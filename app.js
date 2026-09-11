@@ -2,16 +2,16 @@
 // LÖMO CONFIG
 // ========================
 
-// ПОДПРАВЬ при необходимости:
-// Локально (localhost/127.0.0.1) ходим на сервер, поднятый рядом с фронтендом;
-// иначе — на продакшен-бэкенд на Render.
-const IS_LOCAL = ["localhost", "127.0.0.1"].includes(window.location.hostname);
-const API_URL = IS_LOCAL
-  ? `${window.location.protocol}//${window.location.host}`
-  : "https://lyomo-1.onrender.com";
-const WS_URL = IS_LOCAL
-  ? `${window.location.protocol === "https:" ? "wss" : "ws"}://${window.location.host}/ws`
-  : "wss://lyomo-1.onrender.com/ws";
+// server.js отдаёт и фронтенд, и API с одного и того же origin (никогда
+// не были разнесены на разные хосты) — поэтому API_URL/WS_URL всегда
+// просто текущий адрес страницы, без хардкода конкретного домена.
+// Раньше здесь был хардкод "https://lyomo-1.onrender.com" для всего, что
+// не localhost/127.0.0.1 — из-за этого при заходе по IP в локальной сети
+// (например, с телефона на http://192.168.x.x:4000) приложение стучалось
+// на чужой (давно не обновлявшийся) Render-бэкенд вместо реального
+// сервера, и любые запросы (регистрация и т.д.) молча ломались.
+const API_URL = `${window.location.protocol}//${window.location.host}`;
+const WS_URL = `${window.location.protocol === "https:" ? "wss" : "ws"}://${window.location.host}/ws`;
 
 const STORAGE_USER_KEY   = "lomoUser";
 const STORAGE_THEME_KEY  = "lomoTheme";
