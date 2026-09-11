@@ -1,0 +1,45 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8">
+  <title>LÖMO — Фото</title>
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <link rel="stylesheet" href="styles.css">
+  <link rel="manifest" href="manifest.json">
+  <meta name="theme-color" content="#16a34a">
+  <link rel="apple-touch-icon" href="icon-192.png">
+  <link rel="icon" href="icon-192.png" type="image/png">
+</head>
+<body>
+  <div class="layout">
+    <nav class="sidebar" id="sidebarRoot"></nav>
+
+    <div class="app">
+      <header id="headerRoot"></header>
+
+      <section>
+        <h2>Мои альбомы</h2>
+        <div class="media-form">
+          <input id="albumTitleInput" placeholder="Название альбома" />
+          <button id="albumCreateBtn" class="btn primary">Создать альбом</button>
+        </div>
+        <div id="albumsList" class="album-list"></div>
+      </section>
+
+      <section>
+        <h2 id="currentAlbumTitle">—</h2>
+        <div class="media-form">
+          <input type="file" id="photoFileInput" accept="image/*">
+          <button id="photoUploadBtn" class="btn primary">Загрузить фото</button>
+        </div>
+        <div id="photoGrid" class="photo-grid"></div>
+      </section>
+    </div>
+  </div>
+
+  <div id="footerRoot"></div>
+
+  <script src="components.js"></script>
+  <script src="app.js"></script>
+</body>
+</html>

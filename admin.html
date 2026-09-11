@@ -1,0 +1,57 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8">
+  <title>LÖMO — Админка</title>
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <link rel="stylesheet" href="styles.css">
+  <link rel="manifest" href="manifest.json">
+  <meta name="theme-color" content="#16a34a">
+  <link rel="apple-touch-icon" href="icon-192.png">
+  <link rel="icon" href="icon-192.png" type="image/png">
+</head>
+<body>
+  <div class="layout">
+    <nav class="sidebar" id="sidebarRoot"></nav>
+
+    <div class="app">
+      <header id="headerRoot"></header>
+
+      <section>
+        <h2>Обзор</h2>
+        <div id="adminStats" class="admin-stats"></div>
+      </section>
+
+      <section>
+        <h2>На проверке (автомодерация)</h2>
+        <p class="meta">Локальный фильтр автоматически скрыл эти публикации из ленты/стены до вашего решения — одобрите или удалите.</p>
+        <div id="moderationQueue" class="admin-post-list"></div>
+      </section>
+
+      <section>
+        <h2>Модерация публикаций</h2>
+        <div class="media-form">
+          <input id="adminPostSearch" placeholder="Поиск по тексту поста..." />
+          <button id="adminPostSearchBtn" class="btn primary">Найти</button>
+        </div>
+        <div id="adminPostsList" class="admin-post-list"></div>
+      </section>
+
+      <section>
+        <h2>Группы</h2>
+        <div id="adminGroupsList" class="admin-group-list"></div>
+      </section>
+
+      <section>
+        <h2>Жалобы на переписку</h2>
+        <div id="adminChatReportsList" class="admin-post-list"></div>
+      </section>
+    </div>
+  </div>
+
+  <div id="footerRoot"></div>
+
+  <script src="components.js"></script>
+  <script src="app.js"></script>
+</body>
+</html>

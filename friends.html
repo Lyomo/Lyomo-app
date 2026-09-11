@@ -1,0 +1,46 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8">
+  <title>LÖMO — Друзья</title>
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <link rel="stylesheet" href="styles.css">
+  <link rel="manifest" href="manifest.json">
+  <meta name="theme-color" content="#16a34a">
+  <link rel="apple-touch-icon" href="icon-192.png">
+  <link rel="icon" href="icon-192.png" type="image/png">
+</head>
+<body>
+  <div class="layout">
+    <nav class="sidebar" id="sidebarRoot"></nav>
+
+    <div class="app">
+      <header id="headerRoot"></header>
+
+      <section class="profile-edit friends-search-card">
+        <div class="friends-search-row">
+          <input id="friendSearchInput" placeholder="Логин, часть логина или ID">
+          <button id="friendSearchBtn" class="btn primary">Найти</button>
+        </div>
+        <div id="friendSearchResults" class="person-list"></div>
+      </section>
+
+      <section>
+        <div class="tabs" id="friendsTabs">
+          <button type="button" class="tab-btn active" data-tab="friends">Друзья</button>
+          <button type="button" class="tab-btn" data-tab="requests">Заявки</button>
+          <button type="button" class="tab-btn" data-tab="subscriptions">Подписки</button>
+        </div>
+        <div id="friendsList" class="person-list"></div>
+        <div id="friendsRequestsList" class="person-list" hidden></div>
+        <div id="friendsSubsList" class="person-list" hidden></div>
+      </section>
+    </div>
+  </div>
+
+  <div id="footerRoot"></div>
+
+  <script src="components.js"></script>
+  <script src="app.js"></script>
+</body>
+</html>

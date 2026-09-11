@@ -1,0 +1,149 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8">
+  <title>LÖMO — Чаты</title>
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <link rel="stylesheet" href="styles.css">
+  <link rel="manifest" href="manifest.json">
+  <meta name="theme-color" content="#16a34a">
+  <link rel="apple-touch-icon" href="icon-192.png">
+  <link rel="icon" href="icon-192.png" type="image/png">
+</head>
+<body>
+  <div class="layout">
+
+    <nav class="sidebar" id="sidebarRoot"></nav>
+
+    <div class="app">
+      <header id="headerRoot"></header>
+
+      <section class="chat-layout">
+        <aside class="chat-sidebar">
+          <h2>Диалоги</h2>
+
+          <div class="user-search">
+            <input id="userSearchInput" placeholder="ID пользователя">
+            <button id="userSearchBtn" class="btn">Найти</button>
+          </div>
+
+          <div class="rooms-header">
+            <span class="meta">Комнаты и диалоги</span>
+            <button id="btnAddRoom" class="btn">+ Комната</button>
+          </div>
+
+          <div id="addRoomForm" class="add-room-form" hidden>
+            <input id="newRoomName" placeholder="Название беседы">
+            <button id="newRoomConfirmBtn" class="btn primary">Создать</button>
+          </div>
+
+          <ul id="roomList"></ul>
+        </aside>
+
+        <main class="chat-main">
+          <div class="chat-header">
+            <button type="button" id="chatBackBtn" class="chat-back-btn" aria-label="Назад к диалогам"></button>
+            <div class="chat-header-info">
+              <div class="chat-header-avatar" id="chatHeaderAvatar">?</div>
+              <div class="chat-header-text">
+                <div class="chat-header-title" id="chatHeaderTitle">Общий чат</div>
+                <div class="chat-header-subtitle" id="chatHeaderSubtitle">нет соединения</div>
+              </div>
+            </div>
+            <div class="chat-header-menu">
+              <button type="button" id="chatCallBtn" class="chat-call-btn" aria-label="Позвонить" hidden></button>
+              <button type="button" id="chatMenuBtn" class="chat-menu-btn" aria-label="Настройки чата"></button>
+              <div id="chatMenuDropdown" class="chat-menu-dropdown" hidden></div>
+            </div>
+          </div>
+
+          <div id="wallpaperForm" class="add-room-form" hidden>
+            <input id="wallpaperUrlInput" placeholder="Ссылка на картинку (пусто — убрать обои)">
+            <button id="wallpaperApplyBtn" class="btn primary">Применить</button>
+          </div>
+
+          <div id="groupInfoPanel" class="chat-panel" hidden></div>
+
+          <div id="groupManageForm" class="chat-panel" hidden>
+            <label>
+              <div class="meta">Название группы</div>
+              <input id="manageRoomName" placeholder="Название">
+            </label>
+            <label>
+              <div class="meta">Фото комнаты:</div>
+              <div class="avatar-edit-row">
+                <div id="manageRoomAvatarPreview" class="avatar-edit-preview">?</div>
+                <div class="avatar-edit-actions">
+                  <button type="button" id="manageRoomUploadBtn" class="btn">Загрузить фото</button>
+                  <input type="file" id="manageRoomFileInput" accept="image/*" hidden>
+                  <input id="manageRoomAvatar" placeholder="или вставь ссылку https://...">
+                </div>
+              </div>
+            </label>
+            <button id="manageRoomSaveBtn" class="btn primary">Сохранить</button>
+          </div>
+
+          <div id="pollForm" class="chat-panel" hidden>
+            <label>
+              <div class="meta">Вопрос</div>
+              <input id="pollQuestion" placeholder="О чём спросить?">
+            </label>
+            <div class="meta">Варианты ответа</div>
+            <div id="pollOptions" class="poll-options-edit">
+              <input class="poll-option-input" placeholder="Вариант 1">
+              <input class="poll-option-input" placeholder="Вариант 2">
+            </div>
+            <div class="add-room-form">
+              <button type="button" id="pollAddOptionBtn" class="btn">+ Вариант</button>
+              <button type="button" id="pollCreateBtn" class="btn primary">Создать опрос</button>
+            </div>
+          </div>
+
+          <div id="checklistForm" class="chat-panel" hidden>
+            <label>
+              <div class="meta">Название списка</div>
+              <input id="checklistTitle" placeholder="Например: Список покупок">
+            </label>
+            <div class="meta">Пункты</div>
+            <div id="checklistItems" class="poll-options-edit">
+              <input class="checklist-item-input" placeholder="Пункт 1">
+              <input class="checklist-item-input" placeholder="Пункт 2">
+            </div>
+            <div class="add-room-form">
+              <button type="button" id="checklistAddItemBtn" class="btn">+ Пункт</button>
+              <button type="button" id="checklistCreateBtn" class="btn primary">Создать список</button>
+            </div>
+          </div>
+
+          <div id="reportForm" class="chat-panel" hidden>
+            <label>
+              <div class="meta">Опишите проблему (необязательно)</div>
+              <textarea id="reportNote" rows="2" placeholder="Что не так с этим чатом?"></textarea>
+            </label>
+            <button id="reportSendBtn" class="btn primary">Отправить жалобу</button>
+          </div>
+
+          <div id="log"></div>
+
+          <div id="preview" hidden></div>
+
+          <div class="chat-input">
+            <div class="chat-input-row">
+              <button id="btnFile" class="btn-attach"></button>
+              <textarea id="text" rows="1" placeholder="Напиши сообщение..."></textarea>
+              <button id="btnSend" class="btn primary"></button>
+            </div>
+          </div>
+
+          <input type="file" id="file" hidden>
+        </main>
+      </section>
+    </div>
+  </div>
+
+  <div id="footerRoot"></div>
+
+  <script src="components.js"></script>
+  <script src="app.js"></script>
+</body>
+</html>

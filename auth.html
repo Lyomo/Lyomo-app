@@ -1,0 +1,91 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8">
+  <title>LÖMO — Вход</title>
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <link rel="stylesheet" href="styles.css">
+  <link rel="manifest" href="manifest.json">
+  <meta name="theme-color" content="#16a34a">
+  <link rel="apple-touch-icon" href="icon-192.png">
+  <link rel="icon" href="icon-192.png" type="image/png">
+</head>
+<body>
+  <div class="layout">
+    <nav class="sidebar">
+      <div class="sidebar-top">
+        <div class="sidebar-logo">
+          <div class="logo-circle">LÖ</div>
+          <div>
+            <div class="logo-title">LÖMO</div>
+            <div class="logo-sub">твоя соц-песочница</div>
+          </div>
+        </div>
+        <button type="button" id="sidebarCloseBtn" class="sidebar-close-btn" aria-label="Закрыть меню">
+          <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 6l12 12M18 6 6 18"/></svg>
+        </button>
+      </div>
+      <div class="logout-btn" style="opacity:.7;cursor:default;">Вход / Регистрация</div>
+    </nav>
+
+    <div class="app">
+      <header>
+        <button type="button" id="menuToggleBtn" class="hamburger-btn" aria-label="Меню">
+          <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 6.5h16M4 12h16M4 17.5h16"/></svg>
+        </button>
+        <h1>Вход</h1>
+        <div class="actions">
+          <label class="switch">
+            <input type="checkbox" id="darkToggle">
+            <span><svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 14.3A8.4 8.4 0 1 1 9.7 4a7 7 0 0 0 10.3 10.3Z"/></svg></span>
+          </label>
+        </div>
+      </header>
+
+      <section class="home-grid">
+        <div class="profile-card">
+          <h2>Состояние</h2>
+          <p id="authCurrent" class="profile-about"></p>
+          <button id="authGoHome" class="btn primary" style="display:none;margin-top:8px;">На главную</button>
+          <button id="authLogout" class="btn" style="display:none;margin-top:4px;">Выйти</button>
+        </div>
+
+        <div class="profile-edit">
+          <h2>Вход</h2>
+          <label>
+            <div class="meta">Логин</div>
+            <input id="loginLogin" placeholder="Логин">
+          </label>
+          <label>
+            <div class="meta">Пароль</div>
+            <input id="loginPassword" type="password" placeholder="Пароль">
+          </label>
+          <button id="loginBtn" class="btn primary">Войти</button>
+
+          <hr style="margin:14px 0;border:none;border-bottom:1px solid rgba(148,163,184,0.4);">
+
+          <h2>Регистрация</h2>
+          <label>
+            <div class="meta">Логин</div>
+            <input id="regLogin" placeholder="Придумай логин">
+          </label>
+          <label>
+            <div class="meta">Пароль</div>
+            <input id="regPassword" type="password" placeholder="Минимум 4 символа">
+          </label>
+          <label>
+            <div class="meta">Повтор пароля</div>
+            <input id="regPassword2" type="password" placeholder="Повтори пароль">
+          </label>
+          <button id="regBtn" class="btn">Создать аккаунт</button>
+        </div>
+      </section>
+    </div>
+  </div>
+
+  <div id="toastContainer"></div>
+  <audio id="notifySound" src="Gingle.WAV" preload="auto"></audio>
+
+  <script src="app.js"></script>
+</body>
+</html>

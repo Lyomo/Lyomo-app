@@ -1,0 +1,2844 @@
+﻿/* ========== ТЕМЫ И ПЕРЕМЕННЫЕ ========== */
+:root {
+  --bg: #f2f8f3;
+  --fg: #111827;
+  --border: #d9e6dd;
+  --chip: rgba(255,255,255,0.9);
+  --muted: #6b7280;
+  --primary: #22c55e;
+  --primary-dark: #15803d;
+  --accent: #10b981;
+  --shadow: rgba(15, 23, 42, 0.16);
+  --radius-lg: 16px;
+  --radius-md: 10px;
+  --radius-sm: 8px;
+  --transition-fast: 0.18s ease-out;
+  --transition-med: 0.22s ease;
+}
+
+.dark {
+  --bg: #061410;
+  --fg: #e5e7eb;
+  --border: #1c2b22;
+  --chip: rgba(15,23,42,0.92);
+  --muted: #9ca3af;
+  --primary: #4ade80;
+  --primary-dark: #15803d;
+  --accent: #34d399;
+  --shadow: rgba(0, 0, 0, 0.7);
+}
+
+/* ========== ГЛОБАЛЬНОЕ ========== */
+* {
+  box-sizing: border-box;
+}
+
+/* Этот проект уже трижды наступал на одни и те же грабли: элемент с
+   классом типа .person-list/.moderation-reason/#preview задаёт свой
+   display (flex/inline-block), и этот author-стиль ВСЕГДА бьёт UA-правило
+   [hidden]{display:none} независимо от специфичности — элемент с
+   атрибутом hidden остаётся видимым. !important здесь не "плохая
+   практика", а единственный надёжный способ гарантировать, что hidden
+   работает всегда, для любого текущего и будущего класса. */
+[hidden] {
+  display: none !important;
+}
+
+html,
+body {
+  height: 100%;
+  margin: 0;
+  overflow: hidden; /* скролл только внутри нужных блоков */
+}
+
+body {
+  background:
+    radial-gradient(circle at top left, #dcf5e6 0, transparent 45%),
+    radial-gradient(circle at bottom right, #eef9d8 0, transparent 45%),
+    var(--bg);
+  color: var(--fg);
+  font-family: system-ui, -apple-system, "Segoe UI", Roboto, Arial, sans-serif;
+  font-size: 15px;
+  line-height: 1.4;
+}
+
+/* Простые анимации */
+@keyframes fadeInUp {
+  from { opacity: 0; transform: translateY(20px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+
+@keyframes msgIn {
+  from { opacity: 0; transform: translateY(8px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+
+/* Убираем подчёркивание у кнопок и ссылок */
+a,
+button {
+  text-decoration: none !important;
+  color: inherit;
+}
+
+/* Инлайн SVG-иконки (см. icon() в components.js) — не сжимаются в flex и
+   не проваливаются в клики мимо родительской кнопки */
+.icon {
+  flex-shrink: 0;
+  pointer-events: none;
+}
+
+/* ========== ОБЩИЙ ЛЕЙАУТ ========== */
+.layout {
+  height: 100%;
+  display: flex;
+}
+
+/* ========== SIDEBAR (GLASS) ========== */
+.sidebar {
+  width: 250px;
+  background: rgba(255, 255, 255, 0.22);
+  backdrop-filter: blur(18px) saturate(180%);
+  border-right: 1px solid rgba(255, 255, 255, 0.35);
+  box-shadow: 0 0 35px rgba(0, 0, 0, 0.08);
+  display: flex;
+  flex-direction: column;
+  padding: 18px 16px;
+  gap: 18px;
+  /* На десктопе сайдбар не превращается в выезжающую панель (это только
+     мобильный @media ниже) — просто скроллится сам целиком, если окно
+     невысокое, а пунктов много (напр. залогинен админ). Раньше при таком
+     окне пункты меню обрезались/наезжали друг на друга без возможности
+     докрутить. */
+  overflow-y: auto;
+  animation: fadeInUp 0.4s ease;
+}
+
+.dark .sidebar {
+  background: rgba(15,23,42,0.8);
+  border-right-color: rgba(15,23,42,0.9);
+}
+
+/* Оборачивает nav-list + admin/users-ссылки отдельно от шапки сайдбара и
+   кнопки "Выйти" — на мобильном именно эта часть скроллится, а шапка с
+   крестиком закрытия и кнопка "Выйти" всегда остаются на виду (см. мобильный
+   @media ниже). gap здесь = gap родителя, чтобы отступы между пунктами не
+   отличались от того, что было при плоской структуре без обёртки.*/
+.sidebar-scroll {
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+}
+
+.sidebar-top {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.sidebar-logo {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+/* Кнопка закрытия сайдбара — видна только на мобильном (внутри выезжающего
+   сайдбара), на десктопе сайдбар всегда открыт и кнопка не нужна. */
+.sidebar-close-btn {
+  display: none;
+  flex: 0 0 auto;
+  width: 32px;
+  height: 32px;
+  border-radius: 999px;
+  border: none;
+  background: rgba(15,23,42,0.06);
+  color: var(--fg);
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+}
+
+.dark .sidebar-close-btn {
+  background: rgba(148,163,184,0.2);
+}
+
+.logo-circle {
+  width: 44px;
+  height: 44px;
+  border-radius: 14px;
+  background: radial-gradient(circle at 20% 20%, #ffffff 0, #86efac 40%, #16a34a 100%);
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  color: #0b1120;
+  font-weight: 800;
+  font-size: 19px;
+  box-shadow: 0 6px 14px rgba(22, 163, 74, 0.45);
+  transition: transform .25s ease;
+  cursor: pointer;
+  flex: 0 0 auto;
+}
+
+.logo-circle:hover {
+  transform: rotate(5deg) scale(1.05);
+}
+
+.logo-title {
+  font-size: 18px;
+  font-weight: 700;
+}
+
+.logo-sub {
+  font-size: 12px;
+  color: var(--muted);
+}
+
+.nav-list {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+}
+
+.nav-link {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 9px 10px;
+  border-radius: var(--radius-md);
+  margin-bottom: 3px;
+  font-size: 14px;
+  color: var(--muted);
+  position: relative;
+  overflow: hidden;
+  transition: 0.2s;
+}
+
+/* Обёртка вокруг svg-иконки пункта меню — фиксированной ширины, поэтому
+   сама иконка никогда не сдвигается при сворачивании/разворачивании
+   сайдбара (см. секцию "СВОРАЧИВАЕМЫЙ САЙДБАР" выше) — меняется только
+   ширина/прозрачность .nav-label рядом. */
+.nav-icon {
+  flex: 0 0 auto;
+  width: 18px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.nav-link::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(90deg, rgba(34,197,94,0.1), rgba(248,113,113,0.1));
+  opacity: 0;
+  transition: opacity var(--transition-fast);
+}
+
+.nav-link:hover {
+  color: var(--fg);
+  transform: translateX(2px);
+}
+
+.nav-link:hover::before {
+  opacity: 1;
+}
+
+.nav-link.active {
+  background: linear-gradient(90deg, var(--primary), var(--accent));
+  color: #fff;
+  box-shadow: 0 4px 14px rgba(34,197,94,0.4);
+}
+
+.nav-admin,
+.nav-users {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 10px;
+  margin-top: 6px;
+  border-radius: var(--radius-md);
+  font-size: 14px;
+  background: rgba(34, 197, 94, 0.08);
+  border: 1px dashed rgba(34, 197, 94, 0.4);
+  color: var(--primary-dark);
+  transition: 0.2s;
+}
+
+.dark .nav-admin,
+.dark .nav-users {
+  background: rgba(22,163,74,0.24);
+  border-color: rgba(34,197,94,0.7);
+  color: #bbf7d0;
+}
+
+.logout-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  margin-top: auto;
+  padding: 9px 10px;
+  border-radius: var(--radius-md);
+  background: rgba(239,68,68,0.07);
+  color: #b91c1c;
+  cursor: pointer;
+  text-align: center;
+  border: 1px solid rgba(248,113,113,0.25);
+  transition: .2s ease;
+}
+
+.logout-btn:hover {
+  background: rgba(239,68,68,0.12);
+  box-shadow: 0 4px 12px rgba(239,68,68,0.35);
+  transform: translateY(-1px);
+}
+
+/* ========== СВОРАЧИВАЕМЫЙ САЙДБАР (только десктоп) ==========
+   Клик по лого "LÖ" сворачивает сайдбар до одних иконок и обратно —
+   см. initSidebarCollapse() в app.js (вешает .collapsed на .sidebar,
+   состояние живёт в localStorage, т.к. приложение многостраничное).
+   На мобильном сайдбар и так скрыт за хамбургером, сворачивать нечего —
+   поэтому всё ниже внутри min-width медиа-запроса, симметрично тому,
+   как мобильные правила сайдбара живут в своём max-width блоке ниже. */
+@media (min-width: 769px) {
+  .sidebar {
+    transition: width .25s cubic-bezier(.4,0,.2,1), padding .25s cubic-bezier(.4,0,.2,1);
+  }
+
+  .sidebar.collapsed {
+    width: 76px;
+    padding-left: 10px;
+    padding-right: 10px;
+  }
+
+  /* .logo-text/.nav-label раньше прятались через display:none — исчезали
+     мгновенно, пока сама колонка ещё плавно сужалась (transition на
+     width), из-за чего разворачивание/сворачивание выглядело рывком, а
+     не одной плавной анимацией. Теперь они честно анимируются вместе с
+     шириной сайдбара — сжимаются и растворяются (max-width+opacity), а
+     не пропадают/появляются скачком. Базовые правила (transition,
+     стартовые opacity/max-width) — здесь, ВНЕ .collapsed (но всё ещё
+     внутри этого же десктопного media-запроса), чтобы transition
+     срабатывал в обе стороны; конкретные 0-значения для свёрнутого
+     состояния — ниже, уже внутри .collapsed. */
+  .logo-text,
+  .nav-label {
+    overflow: hidden;
+    white-space: nowrap;
+    opacity: 1;
+    max-width: 180px;
+    transition: opacity .18s ease, max-width .25s cubic-bezier(.4,0,.2,1);
+  }
+
+  .sidebar.collapsed .logo-text,
+  .sidebar.collapsed .nav-label {
+    opacity: 0;
+    max-width: 0;
+  }
+
+  /* Раньше центрирование иконки в свёрнутом виде делалось через
+     justify-content:center на самой строке — это скачкообразное
+     свойство (браузер не умеет его анимировать), и иконка мгновенно
+     "прыгала" в центр, пока подпись рядом ещё плавно сжималась. Вместо
+     этого иконка теперь всегда в fixed-width обёртке .nav-icon
+     (см. renderMenu() в components.js) и просто остаётся на месте —
+     а строка становится по-настоящему по центру засчёт симметричного
+     padding, который, в отличие от justify-content, анимируется гладко
+     вместе с шириной сайдбара (transition: 0.2s на .nav-link и
+     подобных уже покрывает и padding). */
+  .sidebar.collapsed .nav-link,
+  .sidebar.collapsed .nav-admin,
+  .sidebar.collapsed .nav-users,
+  .sidebar.collapsed .logout-btn {
+    padding-left: 17px;
+    padding-right: 17px;
+  }
+
+  /* В свёрнутом виде колонка узкая (76px) — даже тонкий скроллбар справа
+     смотрится навязчиво впритык к иконкам. Скролл продолжает работать
+     колесом мыши, просто без видимой полосы (тот же приём, что у
+     .sidebar-scroll на мобильном, см. секцию SCROLLBARS ниже). */
+  .sidebar.collapsed {
+    scrollbar-width: none; /* Firefox */
+  }
+
+  .sidebar.collapsed::-webkit-scrollbar {
+    width: 0;
+    display: none; /* Chrome/Edge/Opera/Safari */
+  }
+}
+
+/* ========== ПРАВАЯ ЧАСТЬ (APP) ========== */
+.app {
+  flex: 1 1 auto;
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  padding: 20px 24px;
+  animation: fadeInUp 0.4s ease;
+  min-width: 0;
+  overflow-y: auto;
+}
+
+/* HEADER */
+header {
+  flex: 0 0 auto;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 16px;
+}
+
+header h1 {
+  margin: 0;
+  font-size: 24px;
+  letter-spacing: 0.04em;
+}
+
+.actions {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+/* Тумблер темы */
+.switch {
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 6px;
+  border-radius: 999px;
+  background: rgba(15,23,42,0.04);
+}
+
+.dark .switch {
+  background: rgba(148,163,184,0.25);
+}
+
+.switch input { display: none; }
+
+/* Кнопка-бутерброд — открывает выезжающий сайдбар на мобильном.
+   На десктопе сайдбар всегда виден, поэтому кнопка скрыта (см. media-запрос). */
+.hamburger-btn {
+  display: none;
+  width: 38px;
+  height: 38px;
+  border-radius: 999px;
+  border: none;
+  background: rgba(15,23,42,0.06);
+  color: var(--fg);
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  flex: 0 0 auto;
+  margin-right: 4px;
+}
+
+.dark .hamburger-btn {
+  background: rgba(148,163,184,0.2);
+}
+
+/* Затемняющая подложка позади выезжающего сайдбара на мобильном */
+.sidebar-backdrop {
+  display: none;
+  position: fixed;
+  inset: 0;
+  background: rgba(0,0,0,0.45);
+  z-index: 40;
+  opacity: 0;
+  transition: opacity .2s ease;
+}
+
+.sidebar-backdrop.visible {
+  display: block;
+  opacity: 1;
+}
+
+
+/* ========== ГЛОБАЛЬНЫЕ INPUT / TEXTAREA ========== */
+
+input,
+textarea {
+  font-family: inherit;
+  color: var(--fg);
+  background: rgba(255,255,255,0.8);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  padding: 7px 10px;
+  outline: none;
+  transition: border-color var(--transition-fast), box-shadow var(--transition-fast), background-color var(--transition-fast), color var(--transition-fast);
+}
+
+.dark input,
+.dark textarea {
+  background: rgba(15,23,42,0.9);
+  border-color: #1f2937;
+}
+
+input::placeholder,
+textarea::placeholder {
+  color: var(--muted);
+}
+
+input:focus,
+textarea:focus {
+  border-color: var(--primary);
+  box-shadow: 0 0 0 1px rgba(34,197,94,0.35);
+}
+
+/* ========== КНОПКИ ========== */
+
+.btn {
+  border: none;
+  background: rgba(255,255,255,0.75);
+  color: #111827;
+  padding: 8px 16px;
+  border-radius: 999px;
+  font-size: 14px;
+  font-weight: 500;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  min-height: 34px;
+  box-shadow: 0 4px 10px rgba(15, 23, 42, 0.18);
+  transition:
+    background 0.18s ease,
+    color 0.18s ease,
+    box-shadow 0.18s ease,
+    transform 0.18s ease;
+  backdrop-filter: blur(10px);
+}
+
+.dark .btn {
+  background: rgba(15,23,42,0.9);
+  color: #e5e7eb;
+  box-shadow: 0 4px 12px rgba(0,0,0,0.6);
+}
+
+.btn:hover {
+  background: rgba(255,255,255,0.95);
+  transform: translateY(-1px);
+  box-shadow: 0 6px 16px rgba(15,23,42,0.26);
+}
+
+.dark .btn:hover {
+  background: rgba(31,41,55,0.95);
+}
+
+.btn:active {
+  transform: translateY(0) scale(0.97);
+  box-shadow: 0 3px 8px rgba(15,23,42,0.25);
+}
+
+.btn:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+  transform: none;
+  box-shadow: none;
+}
+
+.btn.primary {
+  background: linear-gradient(135deg, var(--primary), var(--primary-dark));
+  color: #fff;
+  box-shadow: 0 8px 18px rgba(22,163,74,0.55);
+}
+
+.btn.primary:hover {
+  background: linear-gradient(135deg, var(--primary-dark), #15803d);
+  box-shadow: 0 10px 22px rgba(22,163,74,0.75);
+}
+
+/* Круглая кнопка прикрепить 📎 */
+.btn-attach {
+  width: 38px;
+  height: 38px;
+  border-radius: 50%;
+  background: rgba(255,255,255,0.85);
+  backdrop-filter: blur(14px);
+  border: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 18px;
+  padding: 0;
+  cursor: pointer;
+  box-shadow: 0 4px 14px rgba(0,0,0,0.15);
+  transition:
+    transform 0.18s ease,
+    box-shadow 0.18s ease,
+    background 0.18s ease;
+}
+
+.dark .btn-attach {
+  background: rgba(15,23,42,0.96);
+}
+
+.btn-attach:hover {
+  background: rgba(255,255,255,1);
+  transform: translateY(-2px) scale(1.06);
+  box-shadow: 0 8px 20px rgba(0,0,0,0.25);
+}
+
+.btn-attach:active {
+  transform: scale(0.94);
+  box-shadow: 0 3px 10px rgba(0,0,0,0.25);
+}
+
+/* Чуть компактнее кнопки в маленьких местах */
+.rooms-header .btn,
+.user-search .btn,
+.media-container .btn {
+  padding: 6px 12px;
+  font-size: 13px;
+  min-height: 30px;
+}
+
+/* ========== AUTH (имя в чате) ========== */
+.auth {
+  flex: 0 0 auto;
+  margin-bottom: 12px;
+  display: flex;
+  gap: 10px;
+  align-items: center;
+}
+
+.auth input {
+  width: 260px;
+}
+
+/* ========== HOME / ПРОФИЛЬ ========== */
+
+.home-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+  gap: 20px;
+}
+
+/* карточка профиля */
+.profile-card {
+  padding: 16px;
+  border-radius: var(--radius-lg);
+  background: var(--chip);
+  border: 1px solid rgba(255,255,255,0.5);
+  box-shadow: 0 12px 28px var(--shadow);
+  position: relative;
+  overflow: hidden;
+  backdrop-filter: blur(18px);
+  flex-shrink: 0;
+}
+
+.profile-card::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background: radial-gradient(circle at top right, rgba(34,197,94,0.14), transparent 60%);
+  opacity: 0.9;
+  pointer-events: none;
+}
+
+.profile-avatar-wrap {
+  text-align: center;
+  margin-bottom: 10px;
+  position: relative;
+  z-index: 1;
+}
+
+.profile-avatar {
+  width: 96px;
+  height: 96px;
+  border-radius: 999px;
+  object-fit: cover;
+  display: none;
+  border: 3px solid rgba(255,255,255,0.9);
+  box-shadow: 0 8px 18px rgba(15,23,42,0.55);
+  transition: transform .2s ease, box-shadow .2s ease;
+  cursor: pointer;
+}
+
+.profile-avatar:hover {
+  transform: scale(1.05) translateY(-1px);
+  box-shadow: 0 12px 26px rgba(15,23,42,0.8);
+}
+
+#avatarPlaceholder {
+  width: 96px;
+  height: 96px;
+  border-radius: 999px;
+  background: rgba(148,163,184,0.25);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 26px;
+  color: var(--muted);
+}
+
+.profile-info {
+  position: relative;
+  z-index: 1;
+}
+
+.profile-name {
+  font-size: 19px;
+  font-weight: 700;
+  margin-top: 4px;
+}
+
+.profile-about {
+  margin-top: 2px;
+  color: var(--muted);
+}
+
+/* редактирование профиля — вложено в .profile-card, открывается шестерёнкой в углу */
+.profile-edit {
+  position: static;
+}
+
+.profile-edit label {
+  display: block;
+  margin-bottom: 10px;
+}
+
+.profile-edit input,
+.profile-edit textarea {
+  width: 100%;
+}
+
+.profile-edit-toggle {
+  position: absolute;
+  top: 12px;
+  right: 12px;
+  z-index: 2;
+  width: 34px;
+  height: 34px;
+  border-radius: 999px;
+  background: var(--chip);
+  border: 1px solid rgba(255,255,255,0.5);
+  box-shadow: 0 4px 10px var(--shadow);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  list-style: none;
+  color: var(--fg);
+  transition: background .15s ease, transform .2s ease;
+}
+
+.profile-edit-toggle::-webkit-details-marker {
+  display: none;
+}
+
+.profile-edit-toggle:hover {
+  transform: rotate(45deg);
+}
+
+.profile-edit[open] .profile-edit-toggle {
+  background: rgba(34,197,94,0.25);
+}
+
+.profile-edit-body {
+  position: relative;
+  z-index: 1;
+  margin-top: 16px;
+  padding-top: 16px;
+  border-top: 1px solid rgba(148,163,184,0.3);
+}
+
+.avatar-edit-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.avatar-edit-preview {
+  width: 56px;
+  height: 56px;
+  border-radius: 999px;
+  background: rgba(148,163,184,0.3) center/cover no-repeat;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 20px;
+  font-weight: 700;
+  color: var(--muted);
+  flex: 0 0 auto;
+}
+
+.avatar-edit-actions {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  flex: 1;
+  min-width: 160px;
+}
+
+/* ========== CHAT ЛЕЙАУТ ========== */
+
+.chat-layout {
+  flex: 1 1 auto;
+  min-height: 0;
+  display: grid;
+  grid-template-columns: 260px minmax(0, 1fr);
+  gap: 18px;
+}
+
+/* блок комнат — используем и .rooms, и .chat-sidebar */
+.rooms,
+.chat-sidebar {
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  background: var(--chip);
+  border: 1px solid rgba(255,255,255,0.5);
+  border-radius: var(--radius-lg);
+  padding: 12px;
+  backdrop-filter: blur(16px);
+}
+
+.rooms-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-bottom: 10px;
+  font-weight: 600;
+}
+
+/* поиск по ID */
+.user-search {
+  display: flex;
+  gap: 6px;
+  margin-bottom: 10px;
+}
+
+.user-search input {
+  flex: 1;
+  font-size: 13px;
+}
+
+/* форма создания комнаты — раскрывается по клику на "+ Комната" */
+.add-room-form {
+  display: flex;
+  gap: 6px;
+  margin-bottom: 10px;
+}
+
+.add-room-form input {
+  flex: 1;
+  min-width: 0; /* иначе инпут не сжимается меньше своей intrinsic-ширины и вылезает за узкий сайдбар */
+  font-size: 13px;
+}
+
+/* Общая раскрывающаяся панель в чате — "Информация о группе"/"Управление
+   группой"/"Создать опрос"/"Пожаловаться" (см. renderChatMenu() в app.js) */
+.chat-panel {
+  margin-bottom: 10px;
+  padding: 12px;
+  border-radius: var(--radius-md);
+  background: rgba(148,163,184,0.12);
+  border: 1px solid var(--border);
+}
+
+.chat-panel label {
+  display: block;
+  margin-bottom: 8px;
+}
+
+.chat-panel input,
+.chat-panel textarea {
+  width: 100%;
+}
+
+.chat-panel .add-room-form {
+  margin-bottom: 0;
+}
+
+.group-info-row {
+  display: flex;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 3px 0;
+  font-size: 13px;
+}
+
+.group-info-row .meta {
+  flex: 0 0 auto;
+}
+
+.poll-options-edit {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-bottom: 8px;
+}
+
+/* ===== Опрос как сообщение в чате ===== */
+.poll-message {
+  margin-top: 4px;
+  min-width: 220px;
+}
+
+.poll-question {
+  font-weight: 700;
+  margin-bottom: 8px;
+}
+
+.poll-option {
+  position: relative;
+  display: block;
+  width: 100%;
+  text-align: left;
+  border: 1px solid rgba(255,255,255,0.4);
+  background: rgba(255,255,255,0.12);
+  color: inherit;
+  border-radius: var(--radius-sm);
+  padding: 7px 10px;
+  margin-bottom: 6px;
+  cursor: pointer;
+  overflow: hidden;
+  font-size: 13px;
+}
+
+.poll-option-fill {
+  position: absolute;
+  inset: 0;
+  background: rgba(255,255,255,0.18);
+  z-index: 0;
+  transition: width .25s ease;
+}
+
+.poll-option-label {
+  position: relative;
+  z-index: 1;
+  display: flex;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.poll-option.voted-by-me {
+  border-color: rgba(255,255,255,0.9);
+  font-weight: 600;
+}
+
+.poll-total {
+  font-size: 11px;
+  opacity: 0.85;
+  margin-top: 2px;
+}
+
+/* ===== Список задач как сообщение в чате ("Создать список") ===== */
+.checklist-message {
+  margin-top: 4px;
+  min-width: 220px;
+}
+
+.checklist-title {
+  font-weight: 700;
+  margin-bottom: 6px;
+}
+
+.checklist-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 4px 0;
+  font-size: 13px;
+  cursor: pointer;
+}
+
+.checklist-item input[type="checkbox"] {
+  width: 16px;
+  height: 16px;
+  flex: 0 0 auto;
+  cursor: pointer;
+}
+
+.checklist-item-text {
+  flex: 1;
+  min-width: 0;
+}
+
+.checklist-item.checked .checklist-item-text {
+  text-decoration: line-through;
+  opacity: 0.7;
+}
+
+.checklist-item-by {
+  font-size: 11px;
+  opacity: 0.8;
+  flex: 0 0 auto;
+}
+
+/* Трекер времени на пункте списка — старт/стоп + разбивка "кто сколько" */
+.checklist-timer-row {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px 10px;
+  padding: 2px 0 6px 24px; /* отступ слева — вровень с текстом пункта, а не с чекбоксом */
+}
+
+.checklist-timer-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  border: none;
+  background: rgba(255,255,255,0.14);
+  color: inherit;
+  font-size: 11px;
+  padding: 3px 8px;
+  border-radius: 999px;
+  cursor: pointer;
+  flex: 0 0 auto;
+}
+
+.checklist-timer-btn.running {
+  background: rgba(239,68,68,0.22);
+}
+
+.checklist-timer-breakdown {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 10px;
+}
+
+.checklist-timer-entry {
+  font-size: 11px;
+  opacity: 0.85;
+}
+
+.checklist-timer-entry.running {
+  opacity: 1;
+  font-weight: 600;
+}
+
+/* список комнат */
+#roomList {
+  flex: 1 1 auto;
+  overflow-y: auto;
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  margin-top: 4px;
+}
+
+/* Строка диалога — аватар + имя/превью последнего сообщения + время,
+   по образцу списка диалогов ВК (сначала выбираешь диалог из списка,
+   потом переписываешься внутри него). */
+.room-item {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px;
+  border-radius: var(--radius-md);
+  margin-bottom: 4px;
+  cursor: pointer;
+  transition: background .15s ease;
+}
+
+.room-item:hover {
+  background: rgba(148,163,184,0.16);
+}
+
+.room-item.active {
+  background: rgba(34,197,94,0.16);
+}
+
+.room-avatar {
+  width: 40px;
+  height: 40px;
+  border-radius: 999px;
+  background: rgba(148,163,184,0.35) center/cover no-repeat;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 15px;
+  font-weight: 700;
+  color: var(--muted);
+  flex: 0 0 auto;
+}
+
+.room-body {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.room-name {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--fg);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.room-item.active .room-name {
+  color: var(--primary-dark);
+}
+
+.dark .room-item.active .room-name {
+  color: var(--primary);
+}
+
+.room-preview {
+  font-size: 12px;
+  color: var(--muted);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  margin-top: 1px;
+}
+
+.room-time {
+  font-size: 11px;
+  color: var(--muted);
+  flex: 0 0 auto;
+  align-self: flex-start;
+  margin-top: 2px;
+}
+
+/* окно чата — .chat и .chat-main */
+.chat,
+.chat-main {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  height: 100%;
+  background: var(--chip);
+  border: 1px solid rgba(255,255,255,0.5);
+  border-radius: var(--radius-lg);
+  padding: 12px;
+  box-shadow: 0 10px 24px rgba(15,23,42,0.1);
+  backdrop-filter: blur(18px);
+}
+
+/* заголовок чата — контрастная полоса сверху карточки, отделена от
+   ленты сообщений собственным фоном и границей (иначе на общем стеклянном
+   фоне .chat-main шапка сливалась с сообщениями). Отрицательные margin
+   вытягивают её на всю ширину карточки, скруглённые верхние углы
+   повторяют радиус самой карточки. */
+.chat-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin: -12px -12px 10px -12px;
+  padding: 10px 14px;
+  background: rgba(148,163,184,0.16);
+  border-bottom: 1px solid var(--border);
+  border-radius: var(--radius-lg) var(--radius-lg) 0 0;
+}
+
+.dark .chat-header {
+  background: rgba(15,23,42,0.55);
+}
+
+.chat-header > div {
+  min-width: 0;
+}
+
+/* Кнопка "назад к диалогам" — видна только на мобильном (см. @media),
+   где чат открывается на весь экран поверх списка (как в ВК: сначала
+   выбираешь диалог из списка, "назад" возвращает к списку). */
+.chat-back-btn {
+  display: none;
+  width: 34px;
+  height: 34px;
+  border-radius: 999px;
+  border: none;
+  background: rgba(148,163,184,0.16);
+  color: var(--fg);
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  flex: 0 0 auto;
+}
+
+.chat-header-info {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+  flex: 1 1 auto;
+}
+
+/* Меню "три точки" в шапке чата — как в телеграме: кнопка справа,
+   выпадающий список действий под ней. */
+.chat-header-menu {
+  position: relative;
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.chat-menu-btn {
+  width: 34px;
+  height: 34px;
+  border-radius: 999px;
+  border: none;
+  background: rgba(148,163,184,0.16);
+  color: var(--fg);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+}
+
+.chat-menu-btn:hover {
+  background: rgba(148,163,184,0.28);
+}
+
+/* Кнопка звонка — только для личных диалогов, см. updateChatHeader(). */
+.chat-call-btn {
+  width: 34px;
+  height: 34px;
+  border-radius: 999px;
+  border: none;
+  background: rgba(34,197,94,0.16);
+  color: #16a34a;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+}
+
+.chat-call-btn:hover {
+  background: rgba(34,197,94,0.28);
+}
+
+.dark .chat-call-btn {
+  background: rgba(34,197,94,0.28);
+  color: #4ade80;
+}
+
+.chat-menu-dropdown {
+  position: absolute;
+  top: calc(100% + 6px);
+  right: 0;
+  z-index: 20;
+  min-width: 220px;
+  max-width: 260px;
+  max-height: min(70vh, 420px);
+  overflow-y: auto;
+  background: var(--chip);
+  border: 1px solid rgba(255,255,255,0.5);
+  border-radius: var(--radius-md);
+  box-shadow: 0 12px 28px var(--shadow);
+  backdrop-filter: blur(18px);
+  padding: 6px;
+}
+
+.dark .chat-menu-dropdown {
+  border-color: var(--border);
+}
+
+.chat-menu-item {
+  display: block;
+  width: 100%;
+  text-align: left;
+  border: none;
+  background: none;
+  color: var(--fg);
+  font-size: 13px;
+  padding: 8px 10px;
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+}
+
+.chat-menu-item:hover {
+  background: rgba(148,163,184,0.16);
+}
+
+.chat-menu-item.danger {
+  color: #b91c1c;
+}
+
+.chat-menu-item.danger:hover {
+  background: rgba(239,68,68,0.1);
+}
+
+/* "Запретить копирование" в конкретном диалоге (#log получает этот класс
+   в applyCopyProtection()) */
+.no-copy {
+  user-select: none;
+}
+
+/* Кликабельный — открывает профиль собеседника (личный диалог) или
+   "Информация о группе" (комната), см. initChatPage() в app.js. */
+.chat-header-avatar {
+  width: 40px;
+  height: 40px;
+  border-radius: 999px;
+  background: radial-gradient(circle at 30% 30%, #ffffff 0, #86efac 40%, #16a34a 100%) center/cover no-repeat;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-weight: 700;
+  color: #063d1f;
+  flex: 0 0 auto;
+  cursor: pointer;
+  transition: transform .15s ease, box-shadow .15s ease;
+}
+
+.chat-header-avatar:hover {
+  transform: scale(1.06);
+  box-shadow: 0 4px 14px rgba(0,0,0,0.3);
+}
+
+.chat-header-text {
+  min-width: 0;
+}
+
+.chat-header-title {
+  font-weight: 700;
+  font-size: 16px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.chat-header-subtitle {
+  font-size: 12px;
+  color: var(--muted);
+}
+
+.chat-header-subtitle.online {
+  color: #16a34a;
+}
+
+.dark .chat-header-subtitle.online {
+  color: #4ade80;
+}
+
+/* история сообщений — скроллится */
+/* поддерживаем .log и #log */
+.log,
+#log {
+  flex: 1 1 auto;
+  min-height: 0;
+  max-height: 100%;
+  overflow-y: auto;
+  padding-right: 6px;
+  scroll-behavior: smooth;
+}
+
+/* ========== СООБЩЕНИЯ ЧАТА ==========
+   Структура: .msg-row (флекс-строка) → опционально .msg-avatar (круглое
+   фото/заглушка) + .msg-bubble (сам пузырь: подпись+текст+вложение).
+   Кто получает аватар/имя — решает JS (appendMessageToLog() в app.js),
+   НЕ зависит от ширины экрана:
+     - своё сообщение — никогда ни аватара, ни имени (и так понятно чьё,
+       по цвету/выравниванию);
+     - чужое в личном диалоге (dm-*) — аватар есть, имени нет (собеседник
+       один, и так виден в шапке чата);
+     - чужое в комнате/группе — аватар И имя (отправителей несколько,
+       нужно различать).
+   Ширина экрана (медиа-запрос ниже, порог 1200px — ОТДЕЛЬНЫЙ от
+   основного мобильного брейкпоинта 768px, который двигает сайдбар/
+   переключение списка-чата) влияет только на РАСКЛАДКУ:
+     - ≥1200px — сообщения друг под другом, пузырь на всю ширину лога;
+     - <1200px — пузыри друг напротив друга (свои справа, чужие слева),
+       как в обычном мессенджере. */
+.msg-row {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  margin-bottom: 7px;
+  animation: msgIn 0.22s ease-out;
+}
+
+.msg-avatar {
+  flex: 0 0 auto;
+  width: 26px;
+  height: 26px;
+  border-radius: 999px;
+  background: radial-gradient(circle at 30% 30%, #ffffff 0, #86efac 40%, #16a34a 100%) center/cover no-repeat;
+  box-shadow: 0 2px 6px rgba(15,23,42,0.5);
+}
+
+.msg-bubble {
+  flex: 1 1 auto;
+  min-width: 0;
+  padding: 7px 9px;
+  border-radius: 10px;
+  background: rgba(148,163,184,0.12);
+  border-left: 3px solid rgba(148,163,184,0.7);
+}
+
+.msg-row.me .msg-bubble {
+  background: rgba(34,197,94,0.08);
+  border-left: none;
+  border-right: 3px solid var(--primary);
+}
+
+.msg-row.system {
+  justify-content: center;
+}
+
+.msg-row.system .msg-bubble {
+  flex: 0 1 auto;
+  background: rgba(148,163,184,0.15);
+  border: none;
+  text-align: center;
+  font-size: 12px;
+  color: var(--muted);
+}
+
+.msg-bubble .meta {
+  margin-bottom: 2px;
+  font-size: 11px;
+  color: var(--muted);
+}
+
+/* Время сообщения — отдельной строкой внизу пузыря, прижато вправо
+   (как в обычных мессенджерах), а не сверху рядом с именем. */
+.msg-time {
+  margin-top: 3px;
+  font-size: 10px;
+  color: var(--muted);
+  text-align: right;
+}
+
+/* <1200px — пузыри друг напротив друга вместо колонки друг под другом. */
+@media (max-width: 1199.98px) {
+  .msg-row {
+    align-items: flex-end;
+  }
+
+  .msg-row.me {
+    justify-content: flex-end;
+  }
+
+  .msg-bubble {
+    flex: 0 1 auto;
+    max-width: 78%;
+  }
+}
+
+.msg-attachment-img {
+  display: block;
+  max-width: 220px;
+  max-height: 220px;
+  border-radius: var(--radius-md);
+  margin-top: 4px;
+  object-fit: cover;
+}
+
+.msg-attachment-file {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  margin-top: 4px;
+  padding: 6px 10px;
+  border-radius: var(--radius-md);
+  background: rgba(255,255,255,0.6);
+  font-size: 13px;
+  text-decoration: underline !important;
+}
+
+.dark .msg-attachment-file {
+  background: rgba(15,23,42,0.6);
+}
+
+/* Тёмная тема для сообщений */
+.dark .chat,
+.dark .chat-main {
+  background: var(--chip);
+  border-color: var(--border);
+}
+
+.dark .msg-bubble {
+  background: rgba(15,23,42,0.85);
+  border-left-color: #334155;
+}
+
+.dark .msg-row.me .msg-bubble {
+  background: rgba(22,163,74,0.38);
+  border-right-color: var(--primary);
+}
+
+/* composer (поле ввода + кнопки) */
+/* поддерживаем .composer и .chat-input */
+.composer,
+/* Футер с полем ввода — та же идея, что и у шапки: контрастная полоса
+   снизу карточки, а не сливающийся со всем остальным фон. */
+.chat-input {
+  flex: 0 0 auto;
+  margin: 10px -12px -12px -12px;
+  padding: 10px 14px;
+  background: rgba(148,163,184,0.16);
+  border-top: 1px solid var(--border);
+  border-radius: 0 0 var(--radius-lg) var(--radius-lg);
+}
+
+.dark .chat-input {
+  background: rgba(15,23,42,0.55);
+}
+
+/* для старой разметки .composer сразу flex, для новой — .chat-input-row */
+.composer {
+  display: flex;
+  align-items: flex-end;
+  gap: 10px;
+}
+
+.chat-input-row {
+  display: flex;
+  align-items: flex-end;
+  gap: 10px;
+}
+
+/* поле ввода сообщения — по Y маленькое, растёт до ~6 строк */
+.composer textarea,
+.chat-input textarea,
+.chat-input-row textarea {
+  flex: 1;
+  min-height: 28px;
+  max-height: 120px;
+  padding: 6px 10px;
+  line-height: 1.3;
+  resize: none;
+  overflow-y: auto;
+}
+
+/* блок с кнопками справа */
+.composer-actions {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+/* превью файла — .preview и #preview */
+.preview,
+#preview {
+  position: relative;
+  margin-top: 6px;
+  width: fit-content;
+  background: rgba(15,23,42,0.04);
+  border-radius: var(--radius-md);
+  padding: 6px;
+}
+
+.thumb {
+  padding: 4px 6px;
+  border-radius: var(--radius-sm);
+  background: rgba(148,163,184,0.25);
+}
+
+.thumb-img {
+  display: block;
+  max-width: 160px;
+  max-height: 120px;
+  border-radius: var(--radius-sm);
+  object-fit: cover;
+}
+
+.thumb-clear {
+  position: absolute;
+  top: -8px;
+  right: -8px;
+  width: 22px;
+  height: 22px;
+  border-radius: 999px;
+  border: none;
+  background: rgba(15,23,42,0.65);
+  color: #fff;
+  cursor: pointer;
+  font-size: 11px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+/* ========== MEDIA (music / video / books / группы / фото — форма+список) ========== */
+
+.media-form {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin: 12px 0;
+}
+
+.media-form input {
+  flex: 1;
+  min-width: 160px;
+}
+
+.media-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.media-list li {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 8px;
+  padding: 9px 12px;
+  border-radius: var(--radius-md);
+  background: var(--chip);
+  border: 1px solid rgba(255,255,255,0.5);
+}
+
+.dark .media-list li {
+  border-color: var(--border);
+}
+
+.media-list li span {
+  overflow-wrap: anywhere;
+}
+
+/* ========== USERS PAGE ========== */
+
+.users-card {
+  width: 100%;
+  max-width: 960px;
+  padding: 16px;
+  border-radius: var(--radius-lg);
+  border: 1px solid rgba(255,255,255,0.5);
+  background: var(--chip);
+  box-shadow: 0 12px 28px var(--shadow);
+  backdrop-filter: blur(18px);
+}
+
+.users-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 10px;
+}
+
+.users-header h1 {
+  margin: 0;
+  font-size: 19px;
+}
+
+.users-header .meta {
+  font-size: 12px;
+  color: var(--muted);
+}
+
+.users-card table {
+  width: 100%;
+  border-collapse: collapse;
+  margin-top: 8px;
+}
+
+.users-card th,
+.users-card td {
+  border-bottom: 1px solid var(--border);
+  padding: 6px 8px;
+  font-size: 13px;
+}
+
+.users-card th {
+  background: rgba(148,163,184,0.12);
+  font-weight: 600;
+}
+
+.users-card tr:last-child td {
+  border-bottom: none;
+}
+
+.pwd {
+  font-family: "SF Mono", Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
+}
+
+.admin-user-cell {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.admin-actions-cell {
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+
+.admin-badge {
+  display: inline-block;
+  padding: 2px 8px;
+  border-radius: 999px;
+  font-size: 11px;
+  font-weight: 600;
+  margin-right: 4px;
+}
+
+.admin-badge-admin {
+  background: rgba(34,197,94,0.18);
+  color: #15803d;
+}
+
+.dark .admin-badge-admin {
+  color: #4ade80;
+}
+
+.admin-badge-banned {
+  background: rgba(239,68,68,0.14);
+  color: #b91c1c;
+}
+
+.dark .admin-badge-banned {
+  color: #fca5a5;
+}
+
+.admin-badge-flagged {
+  background: rgba(245,158,11,0.16);
+  color: #b45309;
+}
+
+.dark .admin-badge-flagged {
+  color: #fbbf24;
+}
+
+/* ========== АДМИНКА: статистика, модерация ========== */
+
+.admin-stats {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(140px, 1fr));
+  gap: 10px;
+  margin-top: 10px;
+}
+
+.admin-stat-card {
+  padding: 14px;
+  border-radius: var(--radius-lg);
+  background: var(--chip);
+  border: 1px solid rgba(255,255,255,0.5);
+  box-shadow: 0 8px 20px var(--shadow);
+  backdrop-filter: blur(16px);
+  text-align: center;
+}
+
+.dark .admin-stat-card {
+  border-color: var(--border);
+}
+
+.admin-stat-value {
+  font-size: 24px;
+  font-weight: 800;
+  color: var(--primary-dark);
+}
+
+.dark .admin-stat-value {
+  color: var(--primary);
+}
+
+.admin-stat-label {
+  font-size: 12px;
+  color: var(--muted);
+  margin-top: 2px;
+}
+
+.admin-post-list,
+.admin-group-list {
+  margin-top: 10px;
+}
+
+/* Без явного display — иначе author-правило всегда бьёт UA-правило
+   [hidden]{display:none}, и пустой блок остаётся видимым (проверено на
+   .preview этой же сессией ранее: display:inline-block ломал [hidden]). */
+.moderation-reason {
+  width: fit-content;
+  margin: 4px 0 8px;
+  padding: 4px 10px;
+  border-radius: var(--radius-sm);
+  background: rgba(245,158,11,0.12);
+  color: #b45309;
+  font-size: 12px;
+}
+
+.dark .moderation-reason {
+  color: #fbbf24;
+}
+
+.moderation-comment-row {
+  padding: 12px 14px;
+  border-radius: var(--radius-md);
+  background: var(--chip);
+  border: 1px solid rgba(255,255,255,0.5);
+  box-shadow: 0 6px 16px var(--shadow);
+  margin-bottom: 10px;
+}
+
+.dark .moderation-comment-row {
+  border-color: var(--border);
+}
+
+.moderation-comment-actions {
+  display: flex;
+  gap: 8px;
+  margin-top: 8px;
+}
+
+/* ========== SCROLLBARS ========== */
+
+.log::-webkit-scrollbar,
+#roomList::-webkit-scrollbar,
+#log::-webkit-scrollbar,
+.sidebar::-webkit-scrollbar {
+  width: 6px;
+}
+
+.log::-webkit-scrollbar-thumb,
+#roomList::-webkit-scrollbar-thumb,
+#log::-webkit-scrollbar-thumb,
+.sidebar::-webkit-scrollbar-thumb {
+  background: rgba(148,163,184,0.6);
+  border-radius: 999px;
+}
+
+.log:hover::-webkit-scrollbar-thumb,
+#roomList:hover::-webkit-scrollbar-thumb,
+#log:hover::-webkit-scrollbar-thumb,
+.sidebar:hover::-webkit-scrollbar-thumb {
+  background: rgba(100,116,139,0.9);
+}
+
+/* .sidebar-scroll — список пунктов ВНУТРИ выезжающего мобильного меню.
+   Скроллбар здесь не нужен даже тонкий — на телефоне он смотрится
+   навязчиво в узкой панели; скролл при этом продолжает работать и
+   пальцем, и колесом мыши, просто без видимой полосы. */
+.sidebar-scroll {
+  scrollbar-width: none; /* Firefox */
+}
+
+.sidebar-scroll::-webkit-scrollbar {
+  width: 0;
+  display: none; /* Chrome/Edge/Opera/Safari */
+}
+
+/* ==== СКРЫВАЕМ СКРОЛЛБАР В TEXTAREA (поле ввода сообщения) ==== */
+
+/* Chrome / Edge / Opera */
+.composer textarea::-webkit-scrollbar,
+.chat-input textarea::-webkit-scrollbar,
+.chat-input-row textarea::-webkit-scrollbar {
+  width: 0px;
+  height: 0px;
+}
+
+/* Firefox */
+.composer textarea,
+.chat-input textarea,
+.chat-input-row textarea {
+  scrollbar-width: none; /* скролл работает, но невидим */
+}
+
+/* Safari */
+.composer textarea::-webkit-scrollbar,
+.chat-input textarea::-webkit-scrollbar,
+.chat-input-row textarea::-webkit-scrollbar {
+  display: none;
+}
+
+/* ========== TOAST-УВЕДОМЛЕНИЯ (нижний левый) ========== */
+
+/* на десктопе — отступаем от сайдбара */
+#toastContainer {
+  position: fixed;
+  left: 270px;
+  bottom: 16px;
+  z-index: 9999;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  pointer-events: none;
+}
+
+.toast {
+  background: var(--chip);
+  color: var(--fg);
+  padding: 10px 12px;
+  border-radius: 12px;
+  box-shadow: 0 4px 14px var(--shadow);
+  font-size: 13px;
+  max-width: 260px;
+  opacity: 0.97;
+  transform: translateY(0);
+  transition: opacity 0.25s ease, transform 0.25s ease;
+  pointer-events: auto;
+  border: 1px solid rgba(255,255,255,0.5);
+  backdrop-filter: blur(18px);
+}
+
+.toast-title {
+  font-weight: 600;
+  margin-bottom: 2px;
+}
+
+.toast-text {
+  font-size: 12px;
+  opacity: 0.9;
+}
+
+.toast.hide {
+  opacity: 0;
+  transform: translateY(10px);
+}
+
+/* тёмная тема для toast */
+.dark .toast {
+  background: rgba(15,23,42,0.95);
+  color: #e5e7eb;
+  border-color: #1f2937;
+  box-shadow: 0 8px 24px rgba(0,0,0,0.8);
+}
+
+/* ========== АДАПТИВ (МОБИЛЬНЫЕ) ========== */
+
+@media (max-width: 768px) {
+  html,
+  body {
+    height: auto;
+    overflow: auto;
+  }
+
+  /* Радиальные градиенты фона (body) заданы с угасанием к центру ("45%")
+     и привязаны к верхнему левому/нижнему правому углу БЛОКА body. На
+     десктопе body всегда = высоте экрана (overflow:hidden), но здесь
+     body.height:auto — на короткой странице (мало постов) блок body
+     оказывается короче viewport, градиент угасает в пределах своих
+     ~400px и ниже видна только плоская заливка var(--bg) — получается
+     резкая граница "светлый градиент / плоский цвет" посередине экрана.
+     min-height гарантирует, что body (а с ним и оба градиента) всегда
+     минимум на весь экран, даже если контента мало. */
+  body {
+    min-height: 100vh;
+    min-height: 100dvh;
+  }
+
+  .layout {
+    flex-direction: column;
+    height: auto;
+  }
+
+  /* Сайдбар превращается в выезжающую слева панель поверх контента —
+     скрыт за левым краем экрана, пока не открыт кнопкой-бутербродом
+     (#menuToggleBtn, см. initMobileMenu() в app.js). */
+  .sidebar {
+    position: fixed;
+    top: 0;
+    left: 0;
+    z-index: 50;
+    width: min(280px, 82vw);
+    height: 100%;
+    flex-direction: column;
+    padding: 16px;
+    gap: 10px;
+    transform: translateX(-100%);
+    transition: transform .25s ease;
+    box-shadow: 0 0 40px rgba(0,0,0,0.35);
+    overflow: hidden; /* скроллится не сам сайдбар, а .sidebar-scroll внутри */
+  }
+
+  .sidebar.open {
+    transform: translateX(0);
+  }
+
+  /* Шапка (лого+крестик) и "Выйти" — фиксированной высоты, всегда видны.
+     Скроллится только список пунктов между ними — так на маленьких
+     экранах/с админскими пунктами меню не обрезается снизу и крестик
+     закрытия не "уезжает" вместе с контентом при прокрутке. */
+  .sidebar-top,
+  .logout-btn {
+    flex: 0 0 auto;
+  }
+
+  .sidebar-scroll {
+    flex: 1 1 auto;
+    /* min-height:0 — ТОЛЬКО здесь, в мобильном блоке: без него flex-item с
+       overflow:auto не может сжаться меньше своего контента (initial
+       min-height для flex-item — auto = "по контенту"), и overflow-y:auto
+       просто не сработает. На десктопе этого свойства на .sidebar-scroll
+       НЕТ и не должно быть — там сайдбар не скроллится (весь и так
+       помещается), а min-height:0 давал бы браузеру право сжать блок
+       flex-shrink'ом ниже высоты контента, отчего дочерние пункты меню
+       вылезали за пределы уже сжатого блока и налезали на "Выйти" ниже. */
+    min-height: 0;
+    overflow-y: auto;
+    /* небольшой отступ от возможного скроллбара, чтобы текст не подъезжал вплотную */
+    padding-right: 4px;
+    margin-right: -4px;
+  }
+
+  .sidebar-close-btn {
+    display: flex;
+  }
+
+  .hamburger-btn {
+    display: inline-flex;
+  }
+
+  .nav-list {
+    display: block;
+  }
+
+  .nav-link {
+    white-space: normal;
+  }
+
+  .app {
+    padding: 12px;
+    padding-top: 8px;
+  }
+
+  /* header: бутерброд (фикс.ширина) — заголовок (тянется) — действия справа */
+  header {
+    gap: 8px;
+  }
+
+  header h1 {
+    flex: 1 1 auto;
+    min-width: 0;
+    font-size: 19px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .home-grid {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  /* Чат на мобильном — два отдельных "экрана", как в ВК: сначала список
+     диалогов на весь экран, выбор диалога открывает сам чат на весь
+     экран поверх списка (класс .chat-open добавляется в renderRoomsList()
+     при клике на диалог), кнопка-стрелка в шапке чата (.chat-back-btn)
+     убирает класс и возвращает к списку. На десктопе класс ничего не
+     меняет — там обе колонки видны всегда рядом (см. правило выше,
+     .chat-layout вне этого @media). */
+  .chat-layout {
+    display: block;
+    height: auto;
+  }
+
+  .rooms,
+  .chat-sidebar {
+    height: auto;
+  }
+
+  .chat,
+  .chat-main {
+    display: none;
+    height: auto;
+    margin-top: 12px;
+  }
+
+  .chat-layout.chat-open .chat-sidebar {
+    display: none;
+  }
+
+  /* Открытый чат на мобильном — полноэкранная "накладка" поверх ВСЕЙ
+     страницы, включая обычную шапку (хамбургер/заголовок/тема): у чата
+     уже есть свой хедер (кнопка "назад" + аватар/имя + меню), второй
+     сверху не нужен — как в телеграме/whatsapp. position:fixed вместо
+     обычного потока — иначе высота зависела бы от body{height:auto}
+     (нужного другим мобильным страницам для нормального скролла) и
+     не отслеживала бы появление экранной клавиатуры.
+     Высота — из --app-vh, а не 100vh/100dvh напрямую: dvh не решает
+     проблему на iOS Safari, где раскрытие клавиатуры вообще не меняет
+     layout viewport (чат остался бы за клавиатурой). --app-vh обновляет
+     initMobileChatViewport() в app.js от window.visualViewport.height,
+     который честно уменьшается при открытии клавиатуры. */
+  .chat-layout.chat-open {
+    position: fixed;
+    inset: 0;
+    z-index: 30;
+    height: var(--app-vh, 100dvh);
+  }
+
+  .chat-layout.chat-open .chat-main {
+    display: flex;
+    height: 100%;
+    margin-top: 0;
+    border-radius: 0;
+    border: none;
+    box-shadow: none;
+  }
+
+  .chat-layout.chat-open .chat-header {
+    border-radius: 0;
+  }
+
+  .chat-layout.chat-open .chat-input {
+    border-radius: 0;
+  }
+
+  .chat-back-btn {
+    display: flex;
+  }
+
+  .composer,
+  .chat-input {
+    margin-top: 8px;
+  }
+
+  /* Toast — по ширине экрана */
+  #toastContainer {
+    left: 16px;
+    right: 16px;
+    bottom: 12px;
+  }
+
+  .toast {
+    max-width: 100%;
+  }
+
+  /* Таблица пользователей (users.html) не влезает по ширине на мобильном —
+     превращаем строки в карточки вместо горизонтальной прокрутки таблицы,
+     где кнопки действий обрезались до нечитаемых огрызков ("Сд", "Заб"). */
+  .users-card table,
+  .users-card tbody,
+  .users-card tr,
+  .users-card td {
+    display: block;
+    width: 100%;
+  }
+
+  .users-card thead {
+    display: none;
+  }
+
+  .users-card tr {
+    margin-bottom: 10px;
+    border: 1px solid var(--border);
+    border-radius: var(--radius-md);
+    padding: 10px;
+  }
+
+  .users-card tr:last-child {
+    margin-bottom: 0;
+  }
+
+  .users-card td {
+    border-bottom: none;
+    padding: 4px 0;
+  }
+
+  .users-card td[data-label]::before {
+    content: attr(data-label);
+    display: block;
+    font-size: 11px;
+    color: var(--muted);
+  }
+
+  .admin-actions-cell {
+    padding-top: 6px;
+  }
+}
+
+/* ========== СТЕНА (посты, лайки, комментарии) ========== */
+
+.wall {
+  max-width: 640px;
+}
+
+/* ========== СТОРИС ========== */
+
+.stories-row {
+  display: flex;
+  gap: 14px;
+  overflow-x: auto;
+  overflow-y: hidden;
+  padding: 6px 2px 14px;
+}
+
+.story-bubble {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+  cursor: pointer;
+  flex: 0 0 auto;
+  width: 72px;
+}
+
+.story-avatar {
+  width: 64px;
+  height: 64px;
+  border-radius: 999px;
+  background: rgba(148,163,184,0.25) center/cover no-repeat;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 22px;
+  font-weight: 700;
+  color: var(--muted);
+  border: 3px solid var(--primary);
+  box-shadow: 0 4px 12px var(--shadow);
+}
+
+.story-avatar-add {
+  border: 3px dashed var(--border);
+  color: var(--primary-dark);
+  background: var(--chip);
+}
+
+.dark .story-avatar-add {
+  color: var(--primary);
+}
+
+.story-label {
+  font-size: 12px;
+  text-align: center;
+  max-width: 72px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.story-viewer-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0,0,0,0.85);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 10000;
+}
+
+.story-viewer {
+  position: relative;
+  width: min(420px, 92vw);
+  max-height: 88vh;
+  display: flex;
+  flex-direction: column;
+}
+
+.story-viewer-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  color: #fff;
+  margin-bottom: 8px;
+}
+
+.story-viewer-name {
+  font-weight: 700;
+}
+
+.story-viewer-close {
+  background: none;
+  border: none;
+  color: #fff;
+  cursor: pointer;
+  padding: 4px 8px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.story-viewer-img {
+  width: 100%;
+  max-height: 80vh;
+  object-fit: contain;
+  border-radius: var(--radius-md);
+  background: #000;
+  display: block;
+}
+
+.story-viewer-nav {
+  position: absolute;
+  top: 50%;
+  transform: translateY(-50%);
+  background: rgba(255,255,255,0.15);
+  color: #fff;
+  border: none;
+  width: 36px;
+  height: 36px;
+  border-radius: 999px;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.story-viewer-prev { left: -14px; }
+.story-viewer-next { right: -14px; }
+
+/* Визитка собеседника — по клику на имя в шапке чата (openChatPeerCard()
+   в app.js). Переиспользует .story-viewer-overlay как фон, своя
+   карточка внутри — по образцу телеграмской "визитки контакта". */
+.contact-card {
+  position: relative;
+  width: min(320px, 92vw);
+  max-height: 88vh;
+  overflow-y: auto;
+  background: var(--chip);
+  border-radius: var(--radius-lg);
+  padding: 28px 20px 20px;
+  text-align: center;
+  box-shadow: 0 20px 60px rgba(0,0,0,0.5);
+}
+
+.contact-card-close {
+  position: absolute;
+  top: 10px;
+  right: 10px;
+  width: 30px;
+  height: 30px;
+  border-radius: 999px;
+  border: none;
+  background: rgba(148,163,184,0.18);
+  color: var(--fg);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+}
+
+.contact-card-avatar-wrap {
+  margin-bottom: 12px;
+}
+
+.contact-card-avatar {
+  width: 88px;
+  height: 88px;
+  border-radius: 999px;
+  object-fit: cover;
+  border: 3px solid rgba(255,255,255,0.15);
+  cursor: pointer;
+}
+
+.contact-card-avatar-placeholder {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  margin: 0 auto;
+  background: radial-gradient(circle at 30% 30%, #ffffff 0, #86efac 40%, #16a34a 100%);
+  color: #063d1f;
+  font-weight: 700;
+  font-size: 30px;
+  cursor: default;
+}
+
+.contact-card-name {
+  font-size: 18px;
+  font-weight: 700;
+}
+
+.contact-card-id {
+  font-size: 12px;
+  color: var(--muted);
+  margin-top: 2px;
+  margin-bottom: 14px;
+}
+
+.contact-card-about {
+  font-size: 13px;
+  text-align: left;
+  background: rgba(148,163,184,0.12);
+  border-radius: var(--radius-md);
+  padding: 10px 12px;
+  margin-bottom: 14px;
+}
+
+.contact-card-actions {
+  display: flex;
+  gap: 8px;
+  justify-content: center;
+  flex-wrap: wrap;
+}
+
+/* ========== ЗВОНКИ (аудио через WebRTC) ==========
+   Оверлей звонка — исходящий/входящий/разговор, см. renderCallOverlay()
+   в app.js. z-index выше лайтбокса/визитки (10000/10001 не пересекаются
+   на практике — звонок не открывают поверх фото, но на всякий случай
+   звонок должен быть виден в первую очередь). */
+.call-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0,0,0,0.8);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 10500;
+}
+
+.call-card {
+  width: min(320px, 90vw);
+  text-align: center;
+  color: #fff;
+}
+
+.call-avatar {
+  width: 110px;
+  height: 110px;
+  border-radius: 999px;
+  object-fit: cover;
+  margin: 0 auto 18px;
+  box-shadow: 0 10px 40px rgba(0,0,0,0.5);
+}
+
+.call-avatar-placeholder {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: radial-gradient(circle at 30% 30%, #ffffff 0, #86efac 40%, #16a34a 100%);
+  color: #063d1f;
+  font-weight: 700;
+  font-size: 42px;
+}
+
+.call-name {
+  font-size: 22px;
+  font-weight: 700;
+  margin-bottom: 6px;
+}
+
+.call-status {
+  font-size: 15px;
+  color: rgba(255,255,255,0.7);
+  margin-bottom: 36px;
+  min-height: 20px;
+}
+
+.call-actions {
+  display: flex;
+  gap: 24px;
+  justify-content: center;
+}
+
+.call-btn {
+  width: 56px;
+  height: 56px;
+  border-radius: 999px;
+  border: none;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  color: #fff;
+  transition: transform .15s ease;
+}
+
+.call-btn:hover {
+  transform: scale(1.06);
+}
+
+.call-btn-end,
+.call-btn-decline {
+  background: #ef4444;
+}
+
+/* Иконка "call" — трубка в состоянии "звоню"; для отмены/сброса
+   разворачиваем на 135° — стандартный визуальный приём "положить трубку". */
+.call-btn-end svg,
+.call-btn-decline svg {
+  transform: rotate(135deg);
+}
+
+.call-btn-accept {
+  background: #22c55e;
+}
+
+.call-btn-mute {
+  background: rgba(255,255,255,0.15);
+}
+
+.call-btn-mute.active {
+  background: rgba(255,255,255,0.4);
+}
+
+/* контекст поста в ленте: "на стене X" / "в группе Y" */
+.post-context {
+  font-size: 12px;
+  color: var(--muted);
+  margin-top: -4px;
+  margin-bottom: 8px;
+}
+
+.post-context a {
+  color: var(--primary-dark);
+  font-weight: 600;
+}
+
+.dark .post-context a {
+  color: var(--primary);
+}
+
+.wall-composer {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-bottom: 16px;
+}
+
+.wall-composer textarea {
+  resize: vertical;
+}
+
+.wall-composer-actions {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.wall-composer-preview {
+  position: relative;
+  display: inline-block;
+  width: fit-content;
+}
+
+.wall-composer-preview img {
+  max-width: 220px;
+  max-height: 160px;
+  border-radius: var(--radius-md);
+  display: block;
+  object-fit: cover;
+}
+
+.wall-composer-preview-clear {
+  position: absolute;
+  top: -8px;
+  right: -8px;
+  width: 24px;
+  height: 24px;
+  border-radius: 999px;
+  border: none;
+  background: rgba(15,23,42,0.65);
+  color: #fff;
+  cursor: pointer;
+  font-size: 12px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.post-card {
+  padding: 14px 16px;
+  border-radius: var(--radius-lg);
+  background: var(--chip);
+  border: 1px solid rgba(255,255,255,0.5);
+  box-shadow: 0 8px 20px var(--shadow);
+  backdrop-filter: blur(16px);
+  margin-bottom: 12px;
+}
+
+.dark .post-card {
+  border-color: var(--border);
+}
+
+.post-header {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  margin-bottom: 6px;
+}
+
+.post-author {
+  font-weight: 600;
+  color: var(--primary-dark);
+}
+
+.dark .post-author {
+  color: var(--primary);
+}
+
+.post-date {
+  font-size: 12px;
+  color: var(--muted);
+}
+
+.post-text {
+  white-space: pre-wrap;
+  word-break: break-word;
+  margin-bottom: 10px;
+}
+
+.post-photo {
+  display: block;
+  max-width: 100%;
+  max-height: 420px;
+  border-radius: var(--radius-md);
+  margin-bottom: 10px;
+  object-fit: cover;
+}
+
+.post-actions {
+  display: flex;
+  gap: 8px;
+}
+
+.post-actions .btn {
+  padding: 5px 12px;
+  font-size: 13px;
+  min-height: 28px;
+}
+
+.post-like-btn.active {
+  background: rgba(34,197,94,0.18);
+  color: var(--primary-dark);
+}
+
+.post-comments {
+  margin-top: 10px;
+  padding-top: 10px;
+  border-top: 1px solid var(--border);
+}
+
+.comments-list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-bottom: 8px;
+}
+
+.comment-row {
+  font-size: 13px;
+}
+
+.comment-author {
+  font-weight: 600;
+  color: var(--primary-dark);
+  margin-right: 4px;
+}
+
+.dark .comment-author {
+  color: var(--primary);
+}
+
+.comment-photo {
+  display: block;
+  max-width: 220px;
+  max-height: 220px;
+  border-radius: var(--radius-md);
+  margin-top: 4px;
+  object-fit: cover;
+}
+
+.comment-photo-preview {
+  position: relative;
+  width: fit-content;
+  margin-bottom: 6px;
+}
+
+.comment-photo-preview img {
+  display: block;
+  max-width: 120px;
+  max-height: 90px;
+  border-radius: var(--radius-sm);
+  object-fit: cover;
+}
+
+.comment-form {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.comment-attach-btn.btn-attach {
+  width: 30px;
+  height: 30px;
+  font-size: 14px;
+  flex: 0 0 auto;
+}
+
+.comment-input {
+  flex: 1;
+  font-size: 13px;
+}
+
+/* ========== ДРУЗЬЯ: поиск сверху + вкладки (Друзья/Заявки/Подписки) ========== */
+
+.friends-search-card {
+  margin-bottom: 16px;
+}
+
+.friends-search-row {
+  display: flex;
+  gap: 6px;
+}
+
+.friends-search-row input {
+  flex: 1;
+}
+
+.tabs {
+  display: flex;
+  gap: 6px;
+  margin-bottom: 4px;
+  border-bottom: 1px solid var(--border);
+}
+
+.tab-btn {
+  border: none;
+  background: none;
+  color: var(--muted);
+  font-size: 14px;
+  font-weight: 600;
+  padding: 8px 4px 10px;
+  cursor: pointer;
+  border-bottom: 2px solid transparent;
+  transition: color .15s ease, border-color .15s ease;
+}
+
+.tab-btn:hover {
+  color: var(--fg);
+}
+
+.tab-btn.active {
+  color: var(--primary-dark);
+  border-bottom-color: var(--primary);
+}
+
+.dark .tab-btn.active {
+  color: var(--primary);
+}
+
+/* ========== ЛЮДИ (друзья, поиск, участники) ========== */
+
+.person-list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-top: 10px;
+}
+
+.person-row {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px 10px;
+  padding: 8px 10px;
+  border-radius: var(--radius-md);
+  background: rgba(148,163,184,0.1);
+}
+
+.person-row .person-link {
+  min-width: 140px;
+}
+
+.dark .person-row {
+  background: rgba(15,23,42,0.6);
+}
+
+.person-link {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex: 1;
+  min-width: 0;
+}
+
+.person-avatar {
+  width: 32px;
+  height: 32px;
+  border-radius: 999px;
+  background: rgba(148,163,184,0.35) center/cover no-repeat;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--muted);
+  flex: 0 0 auto;
+}
+
+.person-login {
+  font-weight: 600;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* ========== ГРУППЫ ========== */
+
+.group-list {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+  gap: 12px;
+  margin-top: 12px;
+}
+
+.group-card {
+  padding: 14px;
+  border-radius: var(--radius-lg);
+  background: var(--chip);
+  border: 1px solid rgba(255,255,255,0.5);
+  box-shadow: 0 8px 20px var(--shadow);
+  backdrop-filter: blur(16px);
+}
+
+.dark .group-card {
+  border-color: var(--border);
+}
+
+.group-name {
+  font-weight: 700;
+  font-size: 16px;
+}
+
+.group-description {
+  margin: 6px 0;
+  color: var(--muted);
+  font-size: 13px;
+}
+
+.group-members-count {
+  font-size: 12px;
+  margin: 0;
+}
+
+/* ========== ФОТОАЛЬБОМЫ ========== */
+
+.album-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 10px;
+}
+
+.photo-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(140px, 1fr));
+  gap: 10px;
+  margin-top: 12px;
+}
+
+.photo-item {
+  position: relative;
+  border-radius: var(--radius-md);
+  overflow: hidden;
+  aspect-ratio: 1 / 1;
+  background: rgba(148,163,184,0.15);
+}
+
+.photo-img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+}
+
+.photo-delete-btn {
+  position: absolute;
+  top: 4px;
+  right: 4px;
+  width: 24px;
+  height: 24px;
+  border-radius: 999px;
+  border: none;
+  background: rgba(15,23,42,0.65);
+  color: #fff;
+  cursor: pointer;
+  font-size: 12px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+

@@ -1,0 +1,80 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8">
+  <title>LÖMO — Мой аккаунт</title>
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <link rel="stylesheet" href="styles.css">
+  <link rel="manifest" href="manifest.json">
+  <meta name="theme-color" content="#16a34a">
+  <link rel="apple-touch-icon" href="icon-192.png">
+  <link rel="icon" href="icon-192.png" type="image/png">
+</head>
+<body>
+  <div class="layout">
+
+    <nav class="sidebar" id="sidebarRoot"></nav>
+
+    <div class="app">
+      <header id="headerRoot"></header>
+
+      <section class="home-grid">
+        <div class="profile-card">
+          <div class="profile-avatar-wrap">
+            <img id="profileAvatar" class="profile-avatar" src="" alt="Аватар">
+            <div id="avatarPlaceholder">?</div>
+          </div>
+          <div class="profile-info">
+            <div class="meta">Имя:</div>
+            <div id="profileName" class="profile-name">Гость</div>
+            <div class="meta" style="margin-top:8px;">ID пользователя:</div>
+            <div id="profileId" class="profile-about">нет ID</div>
+            <div class="meta" style="margin-top:8px;">О себе:</div>
+            <div id="profileAbout" class="profile-about">Расскажи о себе :)</div>
+          </div>
+
+          <details class="profile-edit">
+            <summary class="profile-edit-toggle" title="Нажмите, чтобы редактировать профиль" aria-label="Редактировать профиль">
+              <svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true">
+                <path d="M19.14 12.94c.04-.31.06-.62.06-.94s-.02-.63-.06-.94l2.03-1.58a.5.5 0 0 0 .12-.64l-1.92-3.32a.5.5 0 0 0-.6-.22l-2.39.96a7.03 7.03 0 0 0-1.62-.94l-.36-2.54a.5.5 0 0 0-.5-.42h-3.84a.5.5 0 0 0-.5.42l-.36 2.54c-.59.24-1.13.56-1.62.94l-2.39-.96a.5.5 0 0 0-.6.22L2.71 8.84a.5.5 0 0 0 .12.64l2.03 1.58c-.04.31-.06.62-.06.94s.02.63.06.94l-2.03 1.58a.5.5 0 0 0-.12.64l1.92 3.32c.14.24.42.32.6.22l2.39-.96c.49.38 1.03.7 1.62.94l.36 2.54c.05.24.26.42.5.42h3.84c.24 0 .45-.18.5-.42l.36-2.54c.59-.24 1.13-.56 1.62-.94l2.39.96c.24.1.46 0 .6-.22l1.92-3.32a.5.5 0 0 0-.12-.64zM12 15.5a3.5 3.5 0 1 1 0-7 3.5 3.5 0 0 1 0 7z" fill="currentColor"/>
+              </svg>
+            </summary>
+            <div class="profile-edit-body">
+              <label>
+                <div class="meta">Фото профиля:</div>
+                <div class="avatar-edit-row">
+                  <div id="avatarEditPreview" class="avatar-edit-preview">?</div>
+                  <div class="avatar-edit-actions">
+                    <button type="button" id="avatarUploadBtn" class="btn">Загрузить фото</button>
+                    <input type="file" id="avatarFileInput" accept="image/*" hidden>
+                    <input id="avatarUrlInput" placeholder="или вставь ссылку https://...">
+                  </div>
+                </div>
+              </label>
+              <label>
+                <div class="meta">Как тебя зовут?</div>
+                <input id="profileNameInput" placeholder="Имя">
+              </label>
+              <label>
+                <div class="meta">О себе:</div>
+                <textarea id="profileAboutInput" rows="3" placeholder="Увлечения, хобби..."></textarea>
+              </label>
+              <button id="saveProfileBtn" class="btn primary">Сохранить профиль</button>
+            </div>
+          </details>
+        </div>
+      </section>
+
+      <section>
+        <h2>Моя стена</h2>
+        <div id="wallSection" class="wall"></div>
+      </section>
+    </div>
+  </div>
+
+  <div id="footerRoot"></div>
+
+  <script src="components.js"></script>
+  <script src="app.js"></script>
+</body>
+</html>
