@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8">
   <title>LÖMO — Чаты</title>
-  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
   <link rel="stylesheet" href="styles.css">
   <link rel="manifest" href="manifest.json">
   <meta name="theme-color" content="#16a34a">
@@ -23,9 +23,10 @@
           <h2>Диалоги</h2>
 
           <div class="user-search">
-            <input id="userSearchInput" placeholder="ID пользователя">
+            <input id="userSearchInput" placeholder="ID или имя пользователя">
             <button id="userSearchBtn" class="btn">Найти</button>
           </div>
+          <div id="userSearchResults" class="person-list user-search-results" hidden></div>
 
           <div class="rooms-header">
             <span class="meta">Комнаты и диалоги</span>
@@ -61,8 +62,6 @@
             <input id="wallpaperUrlInput" placeholder="Ссылка на картинку (пусто — убрать обои)">
             <button id="wallpaperApplyBtn" class="btn primary">Применить</button>
           </div>
-
-          <div id="groupInfoPanel" class="chat-panel" hidden></div>
 
           <div id="groupManageForm" class="chat-panel" hidden>
             <label>

@@ -61,6 +61,41 @@ function generateUserId() {
   throw new Error("Не удалось сгенерировать уникальный ID пользователя");
 }
 
+// ===== Временная защита сайта общим паролем =====
+// Пока проект не готов к публичному релизу, но уже висит на настоящем
+// домене — просили закрыть буквально ВСЁ (включая саму страницу входа)
+// одним общим логином/паролем поверх обычной системы аккаунтов, HTTP
+// Basic Auth (браузер сам покажет системное окошко). Включается только
+// если заданы ОБЕ переменные окружения — если их нет (обычный локальный
+// dev без .env-настройки этой пары), проверка просто не подключается,
+// ничего не меняется в поведении. Это САМЫЙ ПЕРВЫЙ middleware — раньше
+// cors()/статики/API, чтобы действительно ничего не отдавалось без пароля.
+const SITE_AUTH_USER = process.env.SITE_AUTH_USER;
+const SITE_AUTH_PASS = process.env.SITE_AUTH_PASS;
+if (SITE_AUTH_USER && SITE_AUTH_PASS) {
+  app.use((req, res, next) => {
+    const header = req.headers.authorization || "";
+    const [scheme, encoded] = header.split(" ");
+    if (scheme === "Basic" && encoded) {
+      let decoded = "";
+      try { decoded = Buffer.from(encoded, "base64").toString("utf8"); } catch (e) {}
+      const sep = decoded.indexOf(":");
+      const user = sep >= 0 ? decoded.slice(0, sep) : decoded;
+      const pass = sep >= 0 ? decoded.slice(sep + 1) : "";
+      const userBuf = Buffer.from(user);
+      const expectedUserBuf = Buffer.from(SITE_AUTH_USER);
+      const passBuf = Buffer.from(pass);
+      const expectedPassBuf = Buffer.from(SITE_AUTH_PASS);
+      const userOk = userBuf.length === expectedUserBuf.length && crypto.timingSafeEqual(userBuf, expectedUserBuf);
+      const passOk = passBuf.length === expectedPassBuf.length && crypto.timingSafeEqual(passBuf, expectedPassBuf);
+      if (userOk && passOk) return next();
+    }
+    res.set("WWW-Authenticate", 'Basic realm="LOMO"');
+    res.status(401).send("Требуется пароль доступа к сайту");
+  });
+  console.log("🔒 Сайт закрыт общим паролем (заданы SITE_AUTH_USER/SITE_AUTH_PASS) — доступ только после Basic Auth браузера.");
+}
+
 app.use(cors());
 app.use(express.json());
 
@@ -212,12 +247,31 @@ const stmts = {
   findChatRoom: db.prepare("SELECT * FROM chat_rooms WHERE id = ?"),
   updateChatRoom: db.prepare("UPDATE chat_rooms SET name = ?, avatarUrl = ? WHERE id = ?"),
 
+  // Членство в комнате (не DM, см. комментарий у CREATE TABLE в db.js) —
+  // заводится при подключении по WS, удаляется явным "Покинуть".
+  insertRoomMember: db.prepare("INSERT OR IGNORE INTO chat_room_members (roomId, userId, joinedAt) VALUES (?, ?, ?)"),
+  deleteRoomMember: db.prepare("DELETE FROM chat_room_members WHERE roomId = ? AND userId = ?"),
+  listRoomMembers: db.prepare(`
+    SELECT u.* FROM chat_room_members m
+    JOIN users u ON u.id = m.userId
+    WHERE m.roomId = ?
+    ORDER BY u.login
+  `),
+  // Для честных счётчиков "фото/видео/файлы/ссылки" в модалке "Информация
+  // о группе" — категоризация по расширению/наличию URL делается в JS
+  // (см. roomMediaCounts()), не в SQL, чтобы не городить длинную CASE-цепочку.
+  listRoomAttachmentsAndText: db.prepare("SELECT text, fileUrl FROM messages WHERE room = ?"),
+  touchLastSeen: db.prepare("UPDATE users SET lastSeenAt = ? WHERE id = ?"),
+
   insertChatReport: db.prepare("INSERT INTO chat_reports (id, room, reporterId, note, createdAt) VALUES (?, ?, ?, ?, ?)"),
   listChatReports: db.prepare("SELECT * FROM chat_reports ORDER BY createdAt DESC"),
   deleteChatReport: db.prepare("DELETE FROM chat_reports WHERE id = ?"),
 
   // Поиск людей: подстрока логина ИЛИ точное совпадение ID — одна строка поиска.
-  searchUsers: db.prepare("SELECT * FROM users WHERE (login LIKE ? OR id = ?) AND id <> ? ORDER BY login LIMIT 20"),
+  // login нигде не показывается в UI (см. CLAUDE.md) — поиск только по нему
+  // означал, что человек не мог найти собеседника по имени, которое реально
+  // видит (displayName), только по техническому логину или точному ID.
+  searchUsers: db.prepare("SELECT * FROM users WHERE (login LIKE ? OR displayName LIKE ? OR id = ?) AND id <> ? ORDER BY login LIMIT 20"),
 
   insertPost: db.prepare("INSERT INTO posts (id, ownerType, ownerId, authorId, text, photoUrl, createdAt, moderationStatus, moderationReason) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)"),
   findPostById: db.prepare("SELECT * FROM posts WHERE id = ?"),
@@ -345,6 +399,35 @@ function friendPair(idA, idB) {
 // (уникальность, вход, WS) и в UI отдельно не редактируется.
 function displayNameOf(user) {
   return (user && (user.displayName || user.login)) || "?";
+}
+
+// Честные счётчики "фото/видео/файлы/ссылки" для модалки "Информация о
+// группе" — категоризация вложений по расширению файла и поиск ссылок
+// простым regex по тексту сообщения. Не отдельная СУЩНОСТЬ (галерея с
+// превью), просто числа — так и договорились с пользователем: без
+// отдельной выдачи файлов постранично это сильно проще и всё ещё честно.
+const MEDIA_IMAGE_EXT = new Set(["jpg", "jpeg", "png", "gif", "webp", "svg", "avif"]);
+const MEDIA_VIDEO_EXT = new Set(["mp4", "webm", "mov", "ogg", "mkv"]);
+const MEDIA_URL_RE = /https?:\/\/\S+/i;
+
+function extensionOf(url) {
+  const match = /\.([a-z0-9]+)(?:\?.*)?$/i.exec(url || "");
+  return match ? match[1].toLowerCase() : "";
+}
+
+function roomMediaCounts(roomId) {
+  const rows = stmts.listRoomAttachmentsAndText.all(roomId);
+  const counts = { photos: 0, videos: 0, files: 0, links: 0 };
+  for (const row of rows) {
+    if (row.fileUrl) {
+      const ext = extensionOf(row.fileUrl);
+      if (MEDIA_IMAGE_EXT.has(ext)) counts.photos++;
+      else if (MEDIA_VIDEO_EXT.has(ext)) counts.videos++;
+      else counts.files++;
+    }
+    if (row.text && MEDIA_URL_RE.test(row.text)) counts.links++;
+  }
+  return counts;
 }
 
 function toPublicUser(user) {
@@ -541,7 +624,7 @@ app.get("/api/users", requireAuth, (req, res) => {
   try {
     const q = (req.query.q || "").trim();
     if (!q) return res.json([]);
-    const rows = stmts.searchUsers.all(`%${q}%`, q, req.user.id);
+    const rows = stmts.searchUsers.all(`%${q}%`, `%${q}%`, q, req.user.id);
     res.json(rows.map(toPublicUser));
   } catch (e) { res.status(500).json({ error: "Ошибка поиска" }); }
 });
@@ -1132,6 +1215,53 @@ app.patch("/api/chat-rooms/:id", requireAuth, (req, res) => {
   } catch (e) { res.status(500).json({ error: "Ошибка обновления комнаты" }); }
 });
 
+// Данные для модалки "Информация о группе" (по клику на название чата) —
+// карточка комнаты (если зарегистрирована — "public" и подобные честно
+// идут без owner/createdAt), настоящий список участников (chat_room_members,
+// не выдуманное число) и честные счётчики медиа по истории сообщений.
+// Не для DM — у личного диалога своя "визитка" (openChatPeerCard в app.js).
+app.get("/api/chat-rooms/:id/members", requireAuth, (req, res) => {
+  try {
+    const roomId = req.params.id;
+    if (roomId.startsWith("dm-")) return res.status(400).json({ error: "Не применимо к личным диалогам" });
+    const room = stmts.findChatRoom.get(roomId);
+    const owner = room ? stmts.findUserById.get(room.ownerId) : null;
+
+    const onlineLogins = new Set();
+    clients.forEach((c) => { if (c.ws.readyState === 1) onlineLogins.add(c.login); });
+
+    const members = stmts.listRoomMembers.all(roomId).map((u) => ({
+      id: u.id,
+      displayName: displayNameOf(u),
+      avatarUrl: u.avatarUrl,
+      online: onlineLogins.has(u.login),
+      lastSeenAt: u.lastSeenAt || null
+    }));
+
+    res.json({
+      id: roomId,
+      name: (room && room.name) || (roomId === "public" ? "Общий чат" : roomId),
+      avatarUrl: room ? room.avatarUrl : "",
+      ownerId: room ? room.ownerId : null,
+      ownerName: owner ? displayNameOf(owner) : null,
+      createdAt: room ? room.createdAt : null,
+      members,
+      counts: roomMediaCounts(roomId)
+    });
+  } catch (e) { res.status(500).json({ error: "Ошибка загрузки информации о группе" }); }
+});
+
+// "Покинуть" из новой модалки — убирает только членство (см. выше), сама
+// комната/её сообщения никуда не деваются, и владелец не теряет права
+// (в отличие от групп в groups.html, тут нет отдельной роли владельца
+// членства — только у ownerId в chat_rooms, "Управление" им и так защищено).
+app.post("/api/chat-rooms/:id/leave", requireAuth, (req, res) => {
+  try {
+    stmts.deleteRoomMember.run(req.params.id, req.user.id);
+    res.json({ ok: true });
+  } catch (e) { res.status(500).json({ error: "Ошибка выхода из комнаты" }); }
+});
+
 // ===== Жалобы на переписку =====
 app.post("/api/chat-reports", requireAuth, (req, res) => {
   try {
@@ -1172,16 +1302,70 @@ const wss = new WebSocketServer({ server, path: "/ws" });
 const clients = new Set();
 
 // Реальное число людей, СЕЙЧАС подключённых к этой комнате (по логину, без
-// дублей — если у кого-то открыто две вкладки, считается один раз). Это не
-// "участники беседы" в смысле членства (такой сущности в модели чата нет —
-// комната это просто строка, к которой можно подключиться), а честный live
-// счётчик "кто прямо сейчас смотрит в этот чат", который и показываем в
-// шапке чата вместо выдуманного числа участников.
+// дублей — если у кого-то открыто две вкладки, считается один раз) — честный
+// live-счётчик "кто прямо сейчас смотрит в этот чат", показываем в шапке.
+// Не путать с ЧЛЕНСТВОМ (chat_room_members, ниже) — членство это "кто хоть
+// раз открывал эту комнату", постоянный список для модалки "Информация о
+// группе"; presence — только "кто в ней прямо сейчас", ничего не хранит.
 function broadcastPresence(room) {
   const logins = new Set();
   clients.forEach((c) => { if (c.room === room && c.ws.readyState === 1) logins.add(c.login); });
   const payload = JSON.stringify({ type: "presence", room, count: logins.size });
   clients.forEach((c) => { if (c.room === room && c.ws.readyState === 1) c.ws.send(payload); });
+}
+
+// Статус собеседника в личном диалоге (шапка chats.html для dm-<a>-<b>) —
+// три состояния вместо "N в сети" (это осмысленно для комнаты с кучей
+// народу, но не для диалога один на один): "reading" — собеседник прямо
+// сейчас держит открытым ИМЕННО этот диалог, "online" — подключён где-то
+// ещё (другая страница/комната), но не сюда, "offline" — нигде не
+// подключён. dm-<a>-<b> кодирует ID участников прямо в имени комнаты —
+// не нужна отдельная таблица, просто разбираем строку.
+function getDmParticipantIds(roomId) {
+  if (!roomId.startsWith("dm-")) return null;
+  const parts = roomId.slice(3).split("-");
+  return parts.length === 2 ? parts : null;
+}
+
+function dmConnectionState(userId, roomId) {
+  const user = stmts.findUserById.get(userId);
+  if (!user) return "offline";
+  let here = false, elsewhere = false;
+  clients.forEach((c) => {
+    if (c.ws.readyState !== 1 || c.login !== user.login) return;
+    if (c.room === roomId) here = true; else elsewhere = true;
+  });
+  if (here) return "reading";
+  if (elsewhere) return "online";
+  return "offline";
+}
+
+// Пересчитывает и рассылает статус КАЖДОМУ участнику диалога — то, что он
+// видит, это статус СОБЕСЕДНИКА, не свой собственный. Дёргается на любое
+// подключение/отключение (см. ниже) сразу для всех сейчас активных
+// dm-комнат — при масштабе этого проекта (десятки, не тысячи
+// одновременных соединений) пересчёт "в лоб" по всем активным диалогам
+// дешевле, чем городить точечную инвалидацию по паре участников.
+function broadcastDmPeerStatuses() {
+  const activeDmRooms = new Set();
+  clients.forEach((c) => { if (c.room.startsWith("dm-") && c.ws.readyState === 1) activeDmRooms.add(c.room); });
+  activeDmRooms.forEach((roomId) => {
+    const ids = getDmParticipantIds(roomId);
+    if (!ids) return;
+    const [idA, idB] = ids;
+    const userA = stmts.findUserById.get(idA);
+    const userB = stmts.findUserById.get(idB);
+    const statusForA = dmConnectionState(idB, roomId); // то, что видит A о B
+    const statusForB = dmConnectionState(idA, roomId); // то, что видит B о A
+    clients.forEach((c) => {
+      if (c.room !== roomId || c.ws.readyState !== 1) return;
+      if (userA && c.login === userA.login) {
+        c.ws.send(JSON.stringify({ type: "peerStatus", room: roomId, status: statusForA }));
+      } else if (userB && c.login === userB.login) {
+        c.ws.send(JSON.stringify({ type: "peerStatus", room: roomId, status: statusForB }));
+      }
+    });
+  });
 }
 
 wss.on("connection", (ws, req) => {
@@ -1200,6 +1384,17 @@ wss.on("connection", (ws, req) => {
   const client = { ws, login, room: currentRoom };
   clients.add(client);
   broadcastPresence(currentRoom);
+  broadcastDmPeerStatuses();
+
+  // Членство — только для настоящих комнат/групп, не для личных диалогов
+  // (у dm-<a>-<b> ровно два известных участника и без этой таблицы).
+  // INSERT OR IGNORE — заводится один раз, повторные подключения того же
+  // человека к той же комнате ничего не меняют (joinedAt — момент первого
+  // захода, не последнего).
+  if (connectingUser && !currentRoom.startsWith("dm-")) {
+    stmts.insertRoomMember.run(currentRoom, connectingUser.id, Date.now());
+  }
+  if (connectingUser) stmts.touchLastSeen.run(Date.now(), connectingUser.id);
 
   // Загрузка истории (последние 50)
   try {
@@ -1442,12 +1637,28 @@ wss.on("connection", (ws, req) => {
         }
         return;
       }
+
+      // "Печатает..." — чисто эфемерный сигнал, ничего не сохраняем и не
+      // проверяем на будущее: просто пересылаем всем ОСТАЛЬНЫМ в этой же
+      // комнате (на практике — второму участнику диалога; клиент сам
+      // решает показывать индикатор только для dm-комнат). Троттлинг —
+      // на клиенте (не шлём чаще раза в ~2с), здесь его нет намеренно.
+      if (msg.type === "typing") {
+        clients.forEach((c) => {
+          if (c.room === currentRoom && c.login !== client.login && c.ws.readyState === 1) {
+            c.ws.send(JSON.stringify({ type: "typing", room: currentRoom }));
+          }
+        });
+        return;
+      }
     } catch (e) { console.error(e); }
   });
 
   ws.on("close", () => {
     clients.delete(client);
     broadcastPresence(currentRoom);
+    broadcastDmPeerStatuses();
+    if (connectingUser) stmts.touchLastSeen.run(Date.now(), connectingUser.id);
   });
 });
 

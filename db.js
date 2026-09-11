@@ -128,6 +128,21 @@ db.exec(`
     note TEXT NOT NULL DEFAULT '',
     createdAt INTEGER NOT NULL
   );
+
+  -- Настоящее членство в комнате чата (не DM — у личных диалогов ровно два
+  -- известных участника и без отдельной таблицы, см. dm-<a>-<b>). Строка
+  -- появляется, когда пользователь подключается по WS к этой комнате (см.
+  -- wss.on("connection") в server.js) — то есть реально хоть раз открывал
+  -- этот чат, а не "может теоретически подключиться, зная id". Используется
+  -- модалкой "Информация о группе" для честного списка участников вместо
+  -- выдуманных чисел.
+  CREATE TABLE IF NOT EXISTS chat_room_members (
+    roomId TEXT NOT NULL,
+    userId TEXT NOT NULL,
+    joinedAt INTEGER NOT NULL,
+    PRIMARY KEY (roomId, userId)
+  );
+  CREATE INDEX IF NOT EXISTS idx_room_members_room ON chat_room_members (roomId);
 `);
 
 // Безопасные аддитивные миграции для баз, созданных до появления этих колонок
@@ -153,6 +168,11 @@ ensureColumn("comments", "moderationStatus", "TEXT NOT NULL DEFAULT 'clean'");
 ensureColumn("comments", "moderationReason", "TEXT");
 ensureColumn("messages", "pollData", "TEXT");
 ensureColumn("messages", "checklistData", "TEXT");
+// Момент последней активности (WS-подключение/отключение) — нужен для
+// честного "был(а) в сети N назад" в списке участников комнаты (модалка
+// "Информация о группе"). NULL — пользователь ни разу не подключался с
+// момента добавления этой колонки (аккаунты старше неё).
+ensureColumn("users", "lastSeenAt", "INTEGER");
 
 console.log(`🚀 LÖMO SQLite подключена: ${DB_PATH}`);
 

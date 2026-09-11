@@ -31,6 +31,13 @@
 /* ========== ГЛОБАЛЬНОЕ ========== */
 * {
   box-sizing: border-box;
+  /* Без этого WebKit/Blink на тапе по любой ссылке/кнопке на телефоне на
+     мгновение подсвечивает её сплошным синим прямоугольником (родной
+     "tap highlight") поверх собственных hover/active-стилей проекта —
+     выглядит как случайное выделение перед открытием того, на что
+     нажали. Тактильную обратную связь при тапе дают уже существующие
+     :active-переходы конкретных компонентов, отдельный синий фон не нужен. */
+  -webkit-tap-highlight-color: transparent;
 }
 
 /* Этот проект уже трижды наступал на одни и те же грабли: элемент с
@@ -820,6 +827,18 @@ textarea:focus {
   font-size: 13px;
 }
 
+/* Результаты поиска по имени (когда введённый текст — не точный ID, см.
+   runUserSearch() в app.js) — переиспользует .person-list/.person-row
+   (как на friends.html), но без кнопок действий: вся строка сама —
+   кликабельный переход в диалог (см. .btn.remove() в runUserSearch()). */
+.user-search-results {
+  margin: -4px 0 10px;
+}
+
+.user-search-results .person-row {
+  cursor: pointer;
+}
+
 /* форма создания комнаты — раскрывается по клику на "+ Комната" */
 .add-room-form {
   display: flex;
@@ -855,18 +874,6 @@ textarea:focus {
 
 .chat-panel .add-room-form {
   margin-bottom: 0;
-}
-
-.group-info-row {
-  display: flex;
-  justify-content: space-between;
-  gap: 10px;
-  padding: 3px 0;
-  font-size: 13px;
-}
-
-.group-info-row .meta {
-  flex: 0 0 auto;
 }
 
 .poll-options-edit {
@@ -1495,14 +1502,17 @@ textarea:focus {
   gap: 10px;
 }
 
-/* поле ввода сообщения — по Y маленькое, растёт до ~6 строк */
+/* поле ввода сообщения — растёт до ~6 строк. min-height поднят до 40px
+   (было 28px) — тач-таргет по гайдлайнам Apple/Google должен быть от
+   ~40-44px, а прежняя высота была неудобно маленькой попасть пальцем,
+   особенно с учётом отступов вокруг (composer/chat-input). */
 .composer textarea,
 .chat-input textarea,
 .chat-input-row textarea {
   flex: 1;
-  min-height: 28px;
+  min-height: 40px;
   max-height: 120px;
-  padding: 6px 10px;
+  padding: 10px 12px;
   line-height: 1.3;
   resize: none;
   overflow-y: auto;
@@ -1942,6 +1952,20 @@ textarea:focus {
     transition: transform .25s ease;
     box-shadow: 0 0 40px rgba(0,0,0,0.35);
     overflow: hidden; /* скроллится не сам сайдбар, а .sidebar-scroll внутри */
+    /* Базовый .sidebar — почти прозрачное "стекло" (rgba(255,255,255,0.22)
+       на светлой теме), рассчитанное на десктоп, где за ним всегда фон
+       самого приложения. На мобильном сайдбар — накладка ПОВЕРХ тёмной
+       .sidebar-backdrop (см. ниже), и та же почти прозрачная заливка +
+       blur пропускает тёмную подложку сквозь себя — весь выезжающий
+       список выглядит серым целиком, а не только область вне меню, как
+       и должно быть. Непрозрачный фон здесь чинит именно это — на тёмной
+       теме .dark .sidebar и так достаточно непрозрачный (0.8), поэтому
+       заметно только в светлой. */
+    background: rgba(255,255,255,0.97);
+  }
+
+  .dark .sidebar {
+    background: rgba(15,23,42,0.97);
   }
 
   .sidebar.open {
@@ -2055,7 +2079,16 @@ textarea:focus {
      который честно уменьшается при открытии клавиатуры. */
   .chat-layout.chat-open {
     position: fixed;
-    inset: 0;
+    /* top — не 0 из inset, а --app-vh-offset: компенсирует прокрутку,
+       которую сам iOS Safari делает при фокусе на input рядом с
+       клавиатурой (см. initMobileChatViewport() в app.js) — без этого
+       фикс.позиционированный блок остаётся приколот к верху LAYOUT
+       viewport, а страница под ним прокручивается, и чат визуально
+       "улетает" вверх сильнее, чем нужно. */
+    top: var(--app-vh-offset, 0px);
+    left: 0;
+    right: 0;
+    bottom: auto;
     z-index: 30;
     height: var(--app-vh, 100dvh);
   }
@@ -2079,6 +2112,21 @@ textarea:focus {
 
   .chat-back-btn {
     display: flex;
+  }
+
+  /* "+ Комната" на мобильном раньше жалась мелкой кнопкой (min-height:30px)
+     в один ряд с надписью "Комнаты и диалоги" впритык к правому краю узкой
+     колонки — маленький тач-таргет у самого края, легко промахнуться.
+     На мобильном отдаём ей отдельную строку на всю ширину. */
+  .rooms-header {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .rooms-header .btn {
+    width: 100%;
+    min-height: 40px;
+    font-size: 14px;
   }
 
   .composer,
@@ -2351,6 +2399,192 @@ textarea:focus {
   gap: 8px;
   justify-content: center;
   flex-wrap: wrap;
+}
+
+/* "Информация о группе" — модалка по клику на название чата
+   (showGroupInfoModal() в app.js), по образцу телеграма. Переиспользует
+   .story-viewer-overlay как фон и .contact-card-avatar/-close/-placeholder
+   для аватара/крестика — своя разметка только для того, чего в визитке
+   собеседника не было (быстрые действия, счётчики медиа, список участников). */
+.group-modal {
+  position: relative;
+  width: min(360px, 92vw);
+  max-height: 88vh;
+  overflow-y: auto;
+  background: var(--chip);
+  border-radius: var(--radius-lg);
+  padding: 28px 20px 16px;
+  text-align: center;
+  box-shadow: 0 20px 60px rgba(0,0,0,0.5);
+}
+
+.group-modal-avatar-wrap {
+  margin-bottom: 10px;
+}
+
+.group-modal-name {
+  font-size: 18px;
+  font-weight: 700;
+}
+
+.group-modal-count {
+  font-size: 13px;
+  color: var(--muted);
+  margin-top: 2px;
+  margin-bottom: 16px;
+}
+
+.group-modal-actions {
+  position: relative;
+  display: flex;
+  gap: 6px;
+  margin-bottom: 16px;
+}
+
+.group-modal-action-btn {
+  flex: 1 1 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+  padding: 10px 4px;
+  border: none;
+  border-radius: var(--radius-md);
+  background: rgba(148,163,184,0.14);
+  color: var(--fg);
+  cursor: pointer;
+  font-size: 12px;
+  min-height: 44px;
+}
+
+.dark .group-modal-action-btn {
+  background: rgba(148,163,184,0.16);
+}
+
+.group-modal-action-btn:hover {
+  background: rgba(34,197,94,0.18);
+}
+
+/* Подменю "Ещё" — те же пункты, что раньше жили только в общем "⋮"-меню
+   чата (опрос/список/экспорт/очистка/жалоба), выпадает под кнопкой. */
+.group-modal-more-menu {
+  position: absolute;
+  right: 0;
+  top: calc(100% + 4px);
+  z-index: 1;
+  width: 200px;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  box-shadow: 0 12px 30px rgba(0,0,0,0.25);
+  overflow: hidden;
+  text-align: left;
+}
+
+.group-modal-more-item {
+  display: block;
+  width: 100%;
+  padding: 10px 14px;
+  border: none;
+  background: none;
+  color: var(--fg);
+  text-align: left;
+  cursor: pointer;
+  font-size: 14px;
+}
+
+.group-modal-more-item:hover {
+  background: rgba(148,163,184,0.14);
+}
+
+.group-modal-stats {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  text-align: left;
+  margin-bottom: 14px;
+}
+
+.group-modal-stat-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 4px;
+  font-size: 14px;
+  border-bottom: 1px solid var(--border);
+}
+
+.group-modal-stat-row:last-child {
+  border-bottom: none;
+}
+
+.group-modal-stat-icon {
+  display: flex;
+  color: var(--primary);
+  flex: 0 0 auto;
+}
+
+.group-modal-members {
+  text-align: left;
+}
+
+.group-modal-members-header {
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--muted);
+  letter-spacing: .03em;
+  padding: 6px 4px;
+}
+
+.group-modal-member-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 4px;
+  border-radius: var(--radius-md);
+  color: var(--fg);
+  text-decoration: none;
+}
+
+.group-modal-member-row:hover {
+  background: rgba(148,163,184,0.12);
+}
+
+.group-modal-member-avatar {
+  flex: 0 0 auto;
+  width: 40px;
+  height: 40px;
+  border-radius: 999px;
+  background-size: cover;
+  background-position: center;
+  background-color: rgba(148,163,184,0.25);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-weight: 700;
+  color: var(--fg);
+}
+
+.group-modal-member-info {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.group-modal-member-name {
+  font-weight: 600;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.group-modal-member-status {
+  font-size: 12px;
+  color: var(--muted);
+}
+
+.group-modal-member-status.online {
+  color: var(--primary);
 }
 
 /* ========== ЗВОНКИ (аудио через WebRTC) ==========

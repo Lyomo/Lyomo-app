@@ -208,10 +208,20 @@ function initMobileChatViewport() {
   if (!window.visualViewport) return;
 
   function apply() {
-    document.documentElement.style.setProperty("--app-vh", window.visualViewport.height + "px");
+    const vv = window.visualViewport;
+    document.documentElement.style.setProperty("--app-vh", vv.height + "px");
+    // iOS Safari, открывая клавиатуру на сфокусированном input, сам
+    // прокручивает layout viewport, чтобы поле осталось в поле зрения —
+    // из-за этого у visualViewport появляется offsetTop > 0. Наш
+    // .chat-layout.chat-open зафиксирован через position:fixed относительно
+    // layout viewport (а не visual), поэтому без компенсации этого сдвига
+    // он "уезжает" вместе со страницей вверх на ту же величину — и поверх
+    // уменьшения по высоте получается двойной, слишком резкий скачок.
+    document.documentElement.style.setProperty("--app-vh-offset", vv.offsetTop + "px");
   }
 
   window.visualViewport.addEventListener("resize", apply);
+  window.visualViewport.addEventListener("scroll", apply);
   apply();
 }
 
@@ -1631,11 +1641,51 @@ function setStatusOnline(isOnline) {
 // сервер шлёт это при каждом подключении/отключении кого-либо — см.
 // broadcastPresence() в server.js). Не "участники беседы" в смысле
 // членства (такой сущности в модели чата нет), а честный live-счётчик.
+// Используется только для КОМНАТ/групп — для личных диалогов вместо
+// этого статус собеседника (см. applyDmPeerStatus() ниже): "N в сети"
+// бессмысленно для чата один на один, там либо 0, либо 1.
 function updateRoomPresence(count) {
   const subtitle = document.getElementById("chatHeaderSubtitle");
   if (!subtitle) return;
   subtitle.textContent = `${count} в сети`;
   subtitle.classList.toggle("online", count > 0);
+}
+
+// Статус собеседника в личном диалоге — три состояния вместо счётчика
+// (см. broadcastDmPeerStatuses() в server.js): "reading" — собеседник
+// прямо сейчас держит открытым ЭТОТ диалог, "online" — подключён к
+// приложению, но не в этом диалоге, "offline"/null — нигде. "Печатает..."
+// (см. showTypingIndicator() ниже) временно перекрывает этот текст и
+// сам возвращает его назад по таймеру — поэтому dmPeerStatus хранится
+// отдельно от того, что сейчас в DOM.
+let dmPeerStatus = null;
+let typingRevertTimer = null;
+const DM_STATUS_LABELS = { online: "В сети", reading: "Читает", offline: "" };
+
+function renderDmStatusText() {
+  const subtitle = document.getElementById("chatHeaderSubtitle");
+  if (!subtitle) return;
+  subtitle.textContent = DM_STATUS_LABELS[dmPeerStatus] || "";
+  subtitle.classList.toggle("online", dmPeerStatus === "online" || dmPeerStatus === "reading");
+}
+
+function applyDmPeerStatus(status) {
+  dmPeerStatus = status;
+  // Пока висит "Печатает..." — не перетираем его новым статусом, он и
+  // так вернётся сам, как только истечёт таймер в showTypingIndicator().
+  if (!typingRevertTimer) renderDmStatusText();
+}
+
+function showTypingIndicator() {
+  const subtitle = document.getElementById("chatHeaderSubtitle");
+  if (!subtitle) return;
+  subtitle.textContent = "Печатает...";
+  subtitle.classList.add("online");
+  if (typingRevertTimer) clearTimeout(typingRevertTimer);
+  typingRevertTimer = setTimeout(() => {
+    typingRevertTimer = null;
+    renderDmStatusText();
+  }, 3000);
 }
 
 // Шапка чата: аватар + имя собеседника (для диалога dm-*) или название
@@ -1669,6 +1719,11 @@ function updateChatHeader() {
 
   const callBtn = document.getElementById("chatCallBtn");
   if (callBtn) callBtn.hidden = !currentRoom.startsWith("dm-");
+
+  // Для DM статус собеседника рисуем сразу (даже "пусто", пока не пришёл
+  // реальный peerStatus с сервера) — иначе на секунду мелькал бы
+  // текст/счётчик, оставшийся от предыдущей открытой комнаты.
+  if (currentRoom.startsWith("dm-")) renderDmStatusText();
 
   applyWallpaper();
   applyCopyProtection();
@@ -1764,6 +1819,14 @@ function deleteCurrentRoom() {
   const titleEl = document.getElementById("chatHeaderTitle");
   const title = (titleEl && titleEl.textContent) || "этот чат";
   if (!confirm(`Удалить чат "${title}" из списка?`)) return;
+  // Для настоящих комнат/групп (не DM) это ещё и "Покинуть" из новой
+  // модалки "Информация о группе" — убирает членство (chat_room_members),
+  // чтобы человек не оставался в списке участников после ухода. Best-effort:
+  // если запрос не прошёл, локальное удаление всё равно происходит —
+  // это лишь список для UI, а не право доступа к чему-либо.
+  if (!currentRoom.startsWith("dm-")) {
+    apiRequest(`/api/chat-rooms/${encodeURIComponent(currentRoom)}/leave`, { method: "POST" }).catch(() => {});
+  }
   ensureRoomsLoaded();
   roomsLocal = roomsLocal.filter((r) => r.id !== currentRoom);
   let next = roomsLocal[0];
@@ -1781,7 +1844,7 @@ function deleteCurrentRoom() {
 // взаимоисключающие — открытие одной прячет остальные, чтобы не громоздить
 // несколько форм друг над другом.
 function hideAllChatPanels() {
-  ["wallpaperForm", "groupInfoPanel", "groupManageForm", "pollForm", "checklistForm", "reportForm"].forEach((id) => {
+  ["wallpaperForm", "groupManageForm", "pollForm", "checklistForm", "reportForm"].forEach((id) => {
     const el = document.getElementById(id);
     if (el) el.hidden = true;
   });
@@ -1796,7 +1859,7 @@ function hideAllChatPanels() {
 // в модалке меньше).
 async function openChatPeerCard() {
   if (!currentRoom.startsWith("dm-")) {
-    showGroupInfo();
+    showGroupInfoModal();
     return;
   }
   const peerId = getDmPeerId(currentRoom);
@@ -1888,45 +1951,193 @@ async function openChatPeerCard() {
   document.body.appendChild(overlay);
 }
 
-// "Информация о группе" — честные данные: если комната зарегистрирована
-// (см. registerChatRoomOnServer(), вызывается при создании через
-// "+ Комната") — имя/владелец/дата создания с сервера; если нет (напр.
-// "public" — комната без карточки) — то, что есть локально + сколько
-// сообщений в кэше на этом устройстве. Никаких выдуманных цифр.
-async function showGroupInfo() {
-  hideAllChatPanels();
-  const panel = document.getElementById("groupInfoPanel");
-  if (!panel) return;
-  panel.hidden = false;
-  panel.innerHTML = `<p class="muted">Загрузка...</p>`;
-  const room = getRoomById(currentRoom);
-  const msgCount = loadMessages(currentRoom).length;
-  let serverInfo = null;
-  try { serverInfo = await apiRequest(`/api/chat-rooms/${encodeURIComponent(currentRoom)}`); } catch (e) {}
+// "Информация о группе" — модалка по клику на название чата (как в
+// телеграме), заменяет прежнюю текстовую панель. Данные — GET
+// /api/chat-rooms/:id/members: честный список участников (кто реально хоть
+// раз открывал эту комнату, chat_room_members — не выдуманное число) со
+// статусом "в сети"/"был(а) N назад", и честные счётчики медиа по истории
+// сообщений этой комнаты. Быстрые действия сверху (Звук/Управление/
+// Покинуть/Ещё) — то же самое, что раньше было в общем "⋮"-меню чата,
+// вынесено сюда, т.к. по факту это и есть основной способ туда попасть.
+async function showGroupInfoModal() {
+  if (currentRoom.startsWith("dm-")) return;
 
-  const rows = [];
-  rows.push(["Название", (serverInfo && serverInfo.name) || (room && room.title) || currentRoom]);
-  if (serverInfo) {
-    rows.push(["Создатель", serverInfo.ownerName]);
-    rows.push(["Создана", new Date(serverInfo.createdAt).toLocaleString("ru-RU")]);
-  } else {
-    rows.push(["Тип", "Общая комната (без владельца)"]);
+  let data;
+  try {
+    data = await apiRequest(`/api/chat-rooms/${encodeURIComponent(currentRoom)}/members`);
+  } catch (err) {
+    alert("Не удалось загрузить информацию о группе: " + err.message);
+    return;
   }
-  rows.push(["Сообщений в кэше на этом устройстве", String(msgCount)]);
 
-  panel.innerHTML = "";
-  rows.forEach(([label, value]) => {
-    const row = document.createElement("div");
-    row.className = "group-info-row";
-    const l = document.createElement("span");
-    l.className = "meta";
-    l.textContent = label;
-    const v = document.createElement("span");
-    v.textContent = value;
-    row.appendChild(l);
-    row.appendChild(v);
-    panel.appendChild(row);
+  const overlay = document.createElement("div");
+  overlay.className = "story-viewer-overlay";
+  overlay.innerHTML = `
+    <div class="group-modal">
+      <button type="button" class="contact-card-close">${icon("close", 18)}</button>
+      <div class="group-modal-avatar-wrap"></div>
+      <div class="group-modal-name"></div>
+      <div class="group-modal-count"></div>
+      <div class="group-modal-actions"></div>
+      <div class="group-modal-stats"></div>
+      <div class="group-modal-members"></div>
+    </div>
+  `;
+  const modalEl = overlay.querySelector(".group-modal");
+
+  const avatarWrap = overlay.querySelector(".group-modal-avatar-wrap");
+  if (data.avatarUrl) {
+    const img = document.createElement("img");
+    img.className = "contact-card-avatar";
+    img.src = data.avatarUrl;
+    img.addEventListener("click", () => openPhotoLightbox(data.avatarUrl));
+    avatarWrap.appendChild(img);
+  } else {
+    const ph = document.createElement("div");
+    ph.className = "contact-card-avatar contact-card-avatar-placeholder";
+    ph.textContent = (data.name || "?")[0].toUpperCase();
+    avatarWrap.appendChild(ph);
+  }
+
+  overlay.querySelector(".group-modal-name").textContent = data.name;
+  overlay.querySelector(".group-modal-count").textContent =
+    `${data.members.length} ${pluralRu(data.members.length, "участник", "участника", "участников")}`;
+
+  // Быстрые действия
+  const room = getRoomById(currentRoom);
+  const muted = !!(room && room.muted);
+  const actionsEl = overlay.querySelector(".group-modal-actions");
+
+  function actionBtn(iconName, label, onClick) {
+    const btn = document.createElement("button");
+    btn.type = "button";
+    btn.className = "group-modal-action-btn";
+    btn.innerHTML = `${icon(iconName, 20)}<span>${label}</span>`;
+    btn.addEventListener("click", onClick);
+    return btn;
+  }
+
+  actionsEl.appendChild(actionBtn(muted ? "bellOff" : "bell", muted ? "Без звука" : "Звук", () => {
+    saveRoomMeta(currentRoom, { muted: !muted });
+    overlay.remove();
+    showGroupInfoModal();
+  }));
+  actionsEl.appendChild(actionBtn("admin", "Управление", () => {
+    overlay.remove();
+    showGroupManage();
+  }));
+  actionsEl.appendChild(actionBtn("logout", "Покинуть", () => {
+    overlay.remove();
+    deleteCurrentRoom();
+  }));
+
+  const moreMenu = document.createElement("div");
+  moreMenu.className = "group-modal-more-menu";
+  moreMenu.hidden = true;
+  [
+    ["Создать опрос", showPollForm],
+    ["Создать список", showChecklistForm],
+    ["Экспорт истории чата", exportCurrentHistory],
+    ["Очистить историю", clearCurrentHistory],
+    ["Пожаловаться", () => { hideAllChatPanels(); const f = document.getElementById("reportForm"); if (f) f.hidden = false; }]
+  ].forEach(([label, action]) => {
+    const b = document.createElement("button");
+    b.type = "button";
+    b.className = "group-modal-more-item";
+    b.textContent = label;
+    b.addEventListener("click", () => { overlay.remove(); action(); });
+    moreMenu.appendChild(b);
   });
+  const moreBtn = actionBtn("moreVertical", "Ещё", (e) => {
+    e.stopPropagation();
+    moreMenu.hidden = !moreMenu.hidden;
+  });
+  actionsEl.appendChild(moreBtn);
+  // ВАЖНО: добавляем ВНУТРЬ .group-modal-actions (не после неё) — иначе
+  // .group-modal-actions{position:relative} не был бы offset-родителем
+  // для этого dropdown'а (offset-родитель ищется среди ПРЕДКОВ, не
+  // соседей), и top:calc(100%+4px) считался бы от ближайшего позиционированного
+  // предка выше — .story-viewer-overlay{position:fixed;inset:0}, то есть
+  // от всего экрана целиком, и меню уезжало бы к самому низу viewport'а.
+  actionsEl.appendChild(moreMenu);
+
+  // Счётчики медиа — честные, посчитаны на сервере по истории сообщений
+  // ЭТОЙ комнаты (roomMediaCounts() в server.js), без выдуманных чисел.
+  const statsEl = overlay.querySelector(".group-modal-stats");
+  [
+    { key: "photos", icon: "photos", label: (n) => pluralRu(n, "фотография", "фотографии", "фотографий") },
+    { key: "videos", icon: "video", label: () => "видео" },
+    { key: "files", icon: "clip", label: (n) => pluralRu(n, "файл", "файла", "файлов") },
+    { key: "links", icon: "link", label: (n) => pluralRu(n, "ссылка", "ссылки", "ссылок") }
+  ].forEach((def) => {
+    const n = (data.counts && data.counts[def.key]) || 0;
+    const row = document.createElement("div");
+    row.className = "group-modal-stat-row";
+    const iconWrap = document.createElement("span");
+    iconWrap.className = "group-modal-stat-icon";
+    iconWrap.innerHTML = icon(def.icon, 18);
+    const text = document.createElement("span");
+    text.textContent = `${n} ${def.label(n)}`;
+    row.appendChild(iconWrap);
+    row.appendChild(text);
+    statsEl.appendChild(row);
+  });
+
+  // Список участников — настоящее членство (chat_room_members), не
+  // выдуманное число: попадает сюда каждый, кто хоть раз открывал именно
+  // эту комнату (см. wss.on("connection") в server.js).
+  const membersEl = overlay.querySelector(".group-modal-members");
+  const membersHeader = document.createElement("div");
+  membersHeader.className = "group-modal-members-header";
+  membersHeader.textContent = `${data.members.length} ${pluralRu(data.members.length, "участник", "участника", "участников")}`.toUpperCase();
+  membersEl.appendChild(membersHeader);
+
+  if (!data.members.length) {
+    const empty = document.createElement("p");
+    empty.className = "muted";
+    empty.textContent = "Пока никто не заходил в этот чат.";
+    membersEl.appendChild(empty);
+  } else {
+    data.members.forEach((m) => {
+      const row = document.createElement("a");
+      row.className = "group-modal-member-row";
+      row.href = `profile.html?id=${encodeURIComponent(m.id)}`;
+
+      const avatar = document.createElement("span");
+      avatar.className = "group-modal-member-avatar";
+      if (m.avatarUrl) {
+        avatar.style.backgroundImage = `url("${m.avatarUrl}")`;
+      } else {
+        avatar.textContent = (m.displayName || "?")[0].toUpperCase();
+      }
+
+      const info = document.createElement("span");
+      info.className = "group-modal-member-info";
+      const nameEl = document.createElement("span");
+      nameEl.className = "group-modal-member-name";
+      nameEl.textContent = m.displayName;
+      const statusEl = document.createElement("span");
+      statusEl.className = "group-modal-member-status" + (m.online ? " online" : "");
+      statusEl.textContent = m.online ? "в сети" : formatLastSeen(m.lastSeenAt);
+      info.appendChild(nameEl);
+      info.appendChild(statusEl);
+
+      row.appendChild(avatar);
+      row.appendChild(info);
+      membersEl.appendChild(row);
+    });
+  }
+
+  const close = () => { document.removeEventListener("keydown", onKeydown); overlay.remove(); };
+  function onKeydown(e) { if (e.key === "Escape") close(); }
+  overlay.querySelector(".contact-card-close").addEventListener("click", close);
+  overlay.addEventListener("click", (e) => { if (e.target === overlay) close(); });
+  modalEl.addEventListener("click", (e) => {
+    if (!moreMenu.contains(e.target) && e.target !== moreBtn && !moreBtn.contains(e.target)) moreMenu.hidden = true;
+  });
+  document.addEventListener("keydown", onKeydown);
+
+  document.body.appendChild(overlay);
 }
 
 // "Управление группой" — переименовать/сменить аватар комнаты. Требует,
@@ -2122,7 +2333,10 @@ function renderChatMenu() {
       renderChatMenu();
     }});
   } else {
-    items.push({ label: "Информация о группе", action: showGroupInfo });
+    // "Информация о группе" раньше была отдельным пунктом здесь — теперь
+    // по клику на само название чата открывается новая модалка
+    // (showGroupInfoModal(), см. openChatPeerCard()), дублировать пункт
+    // в этом меню больше не нужно.
     items.push({ label: "Управление группой", action: showGroupManage });
     items.push({ label: "Создать опрос", action: showPollForm });
     items.push({ label: "Создать список", action: showChecklistForm });
@@ -2306,10 +2520,16 @@ function createCallPeerConnection() {
       audioEl = document.createElement("audio");
       audioEl.id = "callRemoteAudio";
       audioEl.autoplay = true;
+      audioEl.playsInline = true;
       audioEl.hidden = true;
       document.body.appendChild(audioEl);
     }
     audioEl.srcObject = e.streams[0];
+    // `autoplay` одного `<audio>` не всегда достаточно на мобильных
+    // (особенно iOS Safari) — даже после пользовательского жеста, которым
+    // был начат звонок, воспроизведение может не стартовать само. Явный
+    // play() — без него звонок "соединяется", но собеседника не слышно.
+    audioEl.play().catch((err) => console.warn("Не удалось запустить воспроизведение звонка:", err));
   });
 
   pc.addEventListener("connectionstatechange", () => {
@@ -2516,7 +2736,19 @@ function connectWebSocket() {
     }
 
     if (msg.type === "presence") {
-      if (msg.room === currentRoom) updateRoomPresence(msg.count);
+      // Счётчик "N в сети" — только для комнат/групп; у личных диалогов
+      // вместо него статус собеседника (см. "peerStatus" ниже).
+      if (msg.room === currentRoom && !currentRoom.startsWith("dm-")) updateRoomPresence(msg.count);
+      return;
+    }
+
+    if (msg.type === "peerStatus") {
+      if (msg.room === currentRoom) applyDmPeerStatus(msg.status);
+      return;
+    }
+
+    if (msg.type === "typing") {
+      if (msg.room === currentRoom && currentRoom.startsWith("dm-")) showTypingIndicator();
       return;
     }
 
@@ -2725,6 +2957,28 @@ async function sendChatMessage() {
 // Короткая метка времени для строки диалога — как в ВК: часы:минуты для
 // сообщений за сегодня, иначе число и месяц (полная дата ни к чему в
 // превью списка).
+// Русское склонение по числу (1 минута / 2 минуты / 5 минут и т.д.) —
+// используется и в "был(а) в сети N назад" (модалка "Информация о группе"),
+// и в счётчиках медиа там же.
+function pluralRu(n, one, few, many) {
+  const mod10 = n % 10, mod100 = n % 100;
+  if (mod10 === 1 && mod100 !== 11) return one;
+  if (mod10 >= 2 && mod10 <= 4 && (mod100 < 10 || mod100 >= 20)) return few;
+  return many;
+}
+
+function formatLastSeen(ts) {
+  if (!ts) return "давно не заходил(а)";
+  const min = Math.floor((Date.now() - ts) / 60000);
+  if (min < 1) return "был(а) только что";
+  if (min < 60) return `был(а) ${min} ${pluralRu(min, "минуту", "минуты", "минут")} назад`;
+  const hours = Math.floor(min / 60);
+  if (hours < 24) return `был(а) ${hours} ${pluralRu(hours, "час", "часа", "часов")} назад`;
+  const days = Math.floor(hours / 24);
+  if (days < 7) return `был(а) ${days} ${pluralRu(days, "день", "дня", "дней")} назад`;
+  return `был(а) ${new Date(ts).toLocaleDateString("ru-RU", { day: "numeric", month: "short" })}`;
+}
+
 function formatRoomTime(ts) {
   if (!ts) return "";
   const d = new Date(ts);
@@ -2811,6 +3065,11 @@ function renderRoomsList() {
 function switchRoom(roomId) {
   if (currentRoom === roomId) return;
   currentRoom = roomId;
+  // Статус собеседника/индикатор "печатает" — per-room: при переходе в
+  // другой диалог старый статус (и, тем более, зависший таймер возврата
+  // из "Печатает...") относится уже не к тому, кто открыт сейчас.
+  dmPeerStatus = null;
+  if (typingRevertTimer) { clearTimeout(typingRevertTimer); typingRevertTimer = null; }
   if (ws) {
     ws.close();
     ws = null;
@@ -2875,6 +3134,7 @@ function initChatPage() {
   const preview         = document.getElementById("preview");
   const userSearchInput = document.getElementById("userSearchInput");
   const userSearchBtn   = document.getElementById("userSearchBtn");
+  const userSearchResults = document.getElementById("userSearchResults");
   const btnAddRoom      = document.getElementById("btnAddRoom");
   const addRoomForm     = document.getElementById("addRoomForm");
   const newRoomName     = document.getElementById("newRoomName");
@@ -2942,7 +3202,7 @@ function initChatPage() {
         const peerId = getDmPeerId(currentRoom);
         if (peerId) window.location.href = `profile.html?id=${encodeURIComponent(peerId)}`;
       } else {
-        showGroupInfo();
+        showGroupInfoModal();
       }
     });
   }
@@ -3041,6 +3301,21 @@ function initChatPage() {
         sendChatMessage();
       }
     });
+
+    // "Печатает..." — только для личных диалогов (см. просьбу пользователя),
+    // в комнатах/группах индикатора нет. Троттлинг раз в ~2с — "input"
+    // стреляет на каждый символ, слать WS-сообщение на каждый было бы
+    // избыточно, собеседнику достаточно знать "печатает прямо сейчас",
+    // не точное число нажатий.
+    let lastTypingSentAt = 0;
+    textarea.addEventListener("input", () => {
+      if (!currentRoom.startsWith("dm-")) return;
+      if (!ws || ws.readyState !== WebSocket.OPEN) return;
+      const now = Date.now();
+      if (now - lastTypingSentAt < 2000) return;
+      lastTypingSentAt = now;
+      ws.send(JSON.stringify({ type: "typing", room: currentRoom }));
+    });
   }
 
   initTextareaAutoGrow();
@@ -3119,46 +3394,103 @@ function initChatPage() {
     });
   }
 
-  if (userSearchBtn && userSearchInput) {
-    userSearchBtn.addEventListener("click", async () => {
-      const id = userSearchInput.value.trim();
-      if (!id) return;
-      try {
-        const data = await apiRequest(`/api/user-by-id/${encodeURIComponent(id)}`, {
-          method: "GET"
-        });
-
-        const me = loadUser();
-        if (!me || !me.id || !data.id) return;
-        const a = me.id;
-        const b = data.id;
-        const roomId = a < b ? `dm-${a}-${b}` : `dm-${b}-${a}`;
-
-        const peerName = data.displayName || data.login;
-        ensureRoomsLoaded();
-        const already = roomsLocal.find((r) => r.id === roomId);
-        if (already) {
-          already.peerLogin = peerName;
-          already.title = `Диалог с ${peerName}`;
-          already.avatarUrl = data.avatarUrl || "";
-        } else {
-          roomsLocal.push({
-            id: roomId,
-            title: `Диалог с ${peerName}`,
-            peerLogin: peerName,
-            avatarUrl: data.avatarUrl || ""
-          });
-        }
-        saveRoomsForUser(roomsLocal);
-        renderRoomsList();
-        if (roomId === currentRoom) updateChatHeader();
-
-        switchRoom(roomId);
-      } catch (err) {
-        console.error(err);
-        alert("Пользователь с таким ID не найден: " + err.message);
+  // Поиск собеседника — сначала пробуем как точный ID (быстрый путь, как
+  // раньше), и только если это не сработало — как имя/логин через
+  // /api/users?q= (тот же поиск, что и на friends.html), с выбором из
+  // списка результатов: по имени совпадений может быть несколько, в
+  // отличие от ID, который всегда указывает на одного конкретного
+  // человека однозначно.
+  async function runUserSearch() {
+    const query = userSearchInput.value.trim();
+    if (!query) return;
+    if (userSearchResults) { userSearchResults.innerHTML = ""; userSearchResults.hidden = true; }
+    try {
+      await openDmWithUserId(query);
+      return;
+    } catch (err) {
+      // не нашлось по ID — пробуем как имя ниже
+    }
+    try {
+      const users = await apiRequest(`/api/users?q=${encodeURIComponent(query)}`);
+      if (!userSearchResults) return;
+      if (!users.length) {
+        userSearchResults.innerHTML = `<p class="muted">Никого не нашлось.</p>`;
+        userSearchResults.hidden = false;
+        return;
       }
+      userSearchResults.innerHTML = "";
+      users.forEach((u) => {
+        const row = renderPersonRow(u, {});
+        row.querySelectorAll(".btn").forEach((b) => b.remove()); // без лишних "Написать"/"Действие" — сама строка кликабельна
+        row.querySelector(".person-link").addEventListener("click", (e) => {
+          e.preventDefault();
+          userSearchResults.hidden = true;
+          userSearchResults.innerHTML = "";
+          userSearchInput.value = "";
+          openDmWithUserId(u.id).catch((err) => alert("Не удалось открыть диалог: " + err.message));
+        });
+        userSearchResults.appendChild(row);
+      });
+      userSearchResults.hidden = false;
+    } catch (err) {
+      alert("Пользователь не найден: " + err.message);
+    }
+  }
+
+  if (userSearchBtn && userSearchInput) {
+    userSearchBtn.addEventListener("click", runUserSearch);
+    userSearchInput.addEventListener("keydown", (e) => {
+      if (e.key === "Enter") { e.preventDefault(); runUserSearch(); }
     });
+  }
+
+  // Переход "Написать сообщение" с чужого профиля (profile.html) приходит
+  // сюда как chats.html?peer=<userId> — открываем/заводим тот же dm-<a>-<b>,
+  // что и поиск по ID выше (это тот же код, см. openDmWithUserId()).
+  const peerParam = new URLSearchParams(window.location.search).get("peer");
+  if (peerParam) {
+    openDmWithUserId(peerParam).catch((err) => {
+      console.error(err);
+      alert("Не удалось открыть диалог: " + err.message);
+    });
+  }
+}
+
+// Открывает (или заводит локальную карточку и открывает) личный диалог с
+// пользователем по его ID — общий код для поиска по ID в чатах и для
+// перехода "Написать сообщение" с профиля/визитки (chats.html?peer=<id>).
+async function openDmWithUserId(userId) {
+  const data = await apiRequest(`/api/user-by-id/${encodeURIComponent(userId)}`, { method: "GET" });
+
+  const me = loadUser();
+  if (!me || !me.id || !data.id) return;
+  const a = me.id;
+  const b = data.id;
+  const roomId = a < b ? `dm-${a}-${b}` : `dm-${b}-${a}`;
+
+  const peerName = data.displayName || data.login;
+  ensureRoomsLoaded();
+  const already = roomsLocal.find((r) => r.id === roomId);
+  if (already) {
+    already.peerLogin = peerName;
+    already.title = `Диалог с ${peerName}`;
+    already.avatarUrl = data.avatarUrl || "";
+  } else {
+    roomsLocal.push({
+      id: roomId,
+      title: `Диалог с ${peerName}`,
+      peerLogin: peerName,
+      avatarUrl: data.avatarUrl || ""
+    });
+  }
+  saveRoomsForUser(roomsLocal);
+  renderRoomsList();
+  if (roomId === currentRoom) updateChatHeader();
+
+  switchRoom(roomId);
+  const chatLayoutEl = document.querySelector(".chat-layout");
+  if (window.matchMedia("(max-width: 768px)").matches && chatLayoutEl) {
+    chatLayoutEl.classList.add("chat-open");
   }
 }
 
@@ -3471,6 +3803,18 @@ function renderPersonRow(user, { onAction, actionLabel } = {}) {
   } else {
     avatarEl.textContent = (displayName || "?")[0].toUpperCase();
   }
+  // "Написать" — есть у любой строки другого пользователя (друзья, заявки,
+  // подписки, результаты поиска), а не только на самой странице профиля —
+  // так со списка можно сразу перейти в личку, не заходя лишний раз в
+  // профиль. openDmWithUserId() определена в разделе чатов ниже по файлу.
+  const me = loadUser();
+  if (!me || me.id !== user.id) {
+    const messageBtn = document.createElement("a");
+    messageBtn.className = "btn";
+    messageBtn.href = `chats.html?peer=${encodeURIComponent(user.id)}`;
+    messageBtn.textContent = "Написать";
+    row.appendChild(messageBtn);
+  }
   if (onAction) {
     const btn = document.createElement("button");
     btn.className = "btn";
@@ -3530,6 +3874,20 @@ async function initProfilePage() {
     if (!friendBtnWrap) return;
     friendBtnWrap.innerHTML = "";
     if (targetId === me.id) return;
+
+    // Раньше с профиля вообще не было способа начать личный диалог —
+    // единственный путь был вручную вбить ID собеседника в поиск на
+    // chats.html, о котором большинство не знало и просто писало в
+    // открытый по умолчанию "Общий чат", думая, что это переписка
+    // один на один. Кнопка ведёт на chats.html?peer=<id> —
+    // openDmWithUserId() там заводит (или открывает уже существующий)
+    // dm-<a>-<b> и сразу переключается в него.
+    const messageBtn = document.createElement("a");
+    messageBtn.className = "btn primary";
+    messageBtn.href = `chats.html?peer=${encodeURIComponent(targetId)}`;
+    messageBtn.textContent = "Написать сообщение";
+    friendBtnWrap.appendChild(messageBtn);
+
     let status;
     try {
       status = (await apiRequest(`/api/friends/status/${encodeURIComponent(targetId)}`)).status;

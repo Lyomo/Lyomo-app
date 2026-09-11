@@ -49,7 +49,10 @@ const ICON_PATHS = {
   pause: '<rect x="7" y="5" width="4" height="14" rx="1" fill="currentColor" stroke="none"/><rect x="13" y="5" width="4" height="14" rx="1" fill="currentColor" stroke="none"/>',
   call: '<path d="M6.6 10.8c1.4 2.8 3.8 5.2 6.6 6.6l2.2-2.2c.3-.3.7-.4 1.1-.3 1.2.4 2.5.6 3.8.6.6 0 1 .4 1 1V20c0 .6-.4 1-1 1C10.6 21 3 13.4 3 4c0-.6.4-1 1-1h3.5c.6 0 1 .4 1 1 0 1.3.2 2.6.6 3.8.1.4 0 .8-.3 1.1L6.6 10.8Z"/>',
   mic: '<rect x="9" y="3" width="6" height="11" rx="3"/><path d="M6 11a6 6 0 0 0 12 0"/><path d="M12 18v3"/>',
-  micOff: '<rect x="9" y="3" width="6" height="11" rx="3"/><path d="M6 11a6 6 0 0 0 10.2 4.5M18 11a6 6 0 0 1-.6 2.6"/><path d="M12 18v3"/><path d="M3.5 3.5l17 17"/>'
+  micOff: '<rect x="9" y="3" width="6" height="11" rx="3"/><path d="M6 11a6 6 0 0 0 10.2 4.5M18 11a6 6 0 0 1-.6 2.6"/><path d="M12 18v3"/><path d="M3.5 3.5l17 17"/>',
+  bell: '<path d="M6 10.6a6 6 0 0 1 12 0v3.3l1.6 2.6H4.4L6 13.9Z"/><path d="M10 19.2a2 2 0 0 0 4 0"/>',
+  bellOff: '<path d="M7 7.3A6 6 0 0 1 18 10.6v3.3l1.6 2.6h-3.2M6 10.6v3.3L4.4 16.5H13"/><path d="M10 19.2a2 2 0 0 0 4 0"/><path d="M3.5 3.5l17 17"/>',
+  link: '<path d="M9.5 14.5 14.5 9.5"/><path d="M8 16 5.8 13.8a3.6 3.6 0 0 1 0-5.1l2-2a3.6 3.6 0 0 1 5.1 0"/><path d="M16 8l2.2 2.2a3.6 3.6 0 0 1 0 5.1l-2 2a3.6 3.6 0 0 1-5.1 0"/>'
 };
 
 function icon(name, size) {
