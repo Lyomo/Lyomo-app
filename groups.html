@@ -18,12 +18,38 @@
       <header id="headerRoot"></header>
 
       <section>
-        <h2>Группы</h2>
+        <div class="groups-toolbar-top">
+          <button type="button" id="groupCreateBtn" class="btn primary mobile-fab-trigger">
+            <span class="btn-label">+ Создать группу</span>
+            <span class="fab-icon" aria-hidden="true"><svg viewBox="0 0 24 24" width="24" height="24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 4.5v15M4.5 12h15"/></svg></span>
+          </button>
+        </div>
 
-        <div class="media-form">
-          <input id="groupNameInput" placeholder="Название группы" />
-          <input id="groupDescInput" placeholder="Описание (необязательно)" />
-          <button id="groupCreateBtn" class="btn primary">Создать</button>
+        <div class="groups-search-row">
+          <input id="groupSearchInput" placeholder="Поиск по названию или описанию">
+          <button type="button" id="groupSearchBtn" class="btn">Найти</button>
+        </div>
+
+        <div class="tabs" id="groupsScopeTabs">
+          <button type="button" class="tab-btn active" data-scope="all">Все группы</button>
+          <button type="button" class="tab-btn" data-scope="mine">Мои группы</button>
+        </div>
+
+        <div class="groups-filter-row">
+          <div class="chip-row" id="groupCategoryChips">
+            <button type="button" class="chip active" data-category="all">Все</button>
+            <button type="button" class="chip" data-category="it">IT и разработка</button>
+            <button type="button" class="chip" data-category="fun">Развлечения</button>
+            <button type="button" class="chip" data-category="games">Игры</button>
+            <button type="button" class="chip" data-category="education">Образование</button>
+            <button type="button" class="chip" data-category="music">Музыка</button>
+            <button type="button" class="chip" data-category="movies">Кино</button>
+            <button type="button" class="chip" data-category="other">Разное</button>
+          </div>
+          <select id="groupSortSelect">
+            <option value="popular">По популярности</option>
+            <option value="new">Сначала новые</option>
+          </select>
         </div>
 
         <div id="groupsList" class="group-list"></div>

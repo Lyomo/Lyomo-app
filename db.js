@@ -143,6 +143,67 @@ db.exec(`
     PRIMARY KEY (roomId, userId)
   );
   CREATE INDEX IF NOT EXISTS idx_room_members_room ON chat_room_members (roomId);
+
+  -- Музыка/Видео/Книги — раньше просто список строк в localStorage
+  -- (заглушка), теперь настоящий личный контент с реальной загрузкой
+  -- файлов через тот же /uploads, что у фото/чата.
+  CREATE TABLE IF NOT EXISTS tracks (
+    id TEXT PRIMARY KEY,
+    ownerId TEXT NOT NULL,
+    title TEXT NOT NULL,
+    artist TEXT NOT NULL DEFAULT '',
+    filename TEXT NOT NULL,
+    originalName TEXT NOT NULL,
+    createdAt INTEGER NOT NULL
+  );
+  CREATE INDEX IF NOT EXISTS idx_tracks_owner ON tracks (ownerId, createdAt);
+
+  -- kind='upload' — свой файл (filename/originalName заполнены), kind='link'
+  -- — внешняя ссылка (сейчас честно умеем встраивать только YouTube,
+  -- остальное — просто кликабельная ссылка "Открыть", см. parseYouTubeId()
+  -- в server.js и рендер на клиенте).
+  CREATE TABLE IF NOT EXISTS videos (
+    id TEXT PRIMARY KEY,
+    ownerId TEXT NOT NULL,
+    title TEXT NOT NULL,
+    kind TEXT NOT NULL CHECK(kind IN ('upload','link')),
+    filename TEXT,
+    originalName TEXT,
+    externalUrl TEXT,
+    createdAt INTEGER NOT NULL
+  );
+  CREATE INDEX IF NOT EXISTS idx_videos_owner ON videos (ownerId, createdAt);
+
+  -- Личная библиотека для чтения — не файлы книг, а карточки (обложка
+  -- ссылкой, как у аватара/группы — тот же осознанно простой паттерн),
+  -- статус "хочу прочитать/читаю/прочитано" и опциональная ссылка "читать".
+  CREATE TABLE IF NOT EXISTS books (
+    id TEXT PRIMARY KEY,
+    ownerId TEXT NOT NULL,
+    title TEXT NOT NULL,
+    author TEXT NOT NULL DEFAULT '',
+    coverUrl TEXT NOT NULL DEFAULT '',
+    status TEXT NOT NULL DEFAULT 'want' CHECK(status IN ('want','reading','done')),
+    link TEXT NOT NULL DEFAULT '',
+    createdAt INTEGER NOT NULL
+  );
+  CREATE INDEX IF NOT EXISTS idx_books_owner ON books (ownerId, createdAt);
+
+  -- Пользовательское соглашение — редактируется из админки (см.
+  -- server.js: GET /api/terms — публичный, читает модалка на auth.html;
+  -- PATCH /api/admin/terms/:lang — только админ). "body" - параграфы,
+  -- по одному на строку (перевод строки как разделитель) - это же формат,
+  -- в котором его показывает и редактирует textarea в admin.html, один
+  -- к одному, без парсинга JSON туда-обратно. Заполняется дефолтным
+  -- текстом на 4 языках при первом старте сервера, если таблица пустая
+  -- (см. seedDefaultTerms() в server.js).
+  CREATE TABLE IF NOT EXISTS terms_content (
+    lang TEXT PRIMARY KEY,
+    label TEXT NOT NULL,
+    title TEXT NOT NULL,
+    body TEXT NOT NULL,
+    updatedAt INTEGER NOT NULL
+  );
 `);
 
 // Безопасные аддитивные миграции для баз, созданных до появления этих колонок
@@ -173,6 +234,29 @@ ensureColumn("messages", "checklistData", "TEXT");
 // "Информация о группе"). NULL — пользователь ни разу не подключался с
 // момента добавления этой колонки (аккаунты старше неё).
 ensureColumn("users", "lastSeenAt", "INTEGER");
+
+// Момент принятия пользовательского соглашения при регистрации (см.
+// /api/register в server.js) — держим как честный аудиторский след, а не
+// просто галочку на клиенте. NULL — аккаунт создан до появления этой
+// колонки (соглашения при регистрации ещё не было).
+ensureColumn("users", "termsAcceptedAt", "INTEGER");
+
+// Дата рождения, указывается один раз при регистрации (см. /api/register
+// в server.js — там же проверка возраста 13+, синхронно с текстом
+// пользовательского соглашения). Хранится строкой "YYYY-MM-DD" (формат
+// нативного <input type="date">), не Unix-таймстампом — дата рождения не
+// момент времени, часовой пояс тут не при чём, а строка сравнивается и
+// сортируется лексикографически так же корректно, как и по значению.
+// Пустая строка — аккаунт создан до появления этого поля.
+ensureColumn("users", "birthDate", "TEXT NOT NULL DEFAULT ''");
+
+// Категория группы — фиксированный набор ключей (GROUP_CATEGORY_KEYS в
+// server.js), не свободные теги: по совету из дизайн-ревью (см. CLAUDE.md)
+// свободные теги потребовали бы нормализации ("#JS"/"js"/"JavaScript") и
+// отдельной таблицы many-to-many ради того же результата, который тут даёт
+// одна строковая колонка + `WHERE category = ?`. 'other' — дефолт и для
+// новых групп без явного выбора, и для групп, созданных до этой колонки.
+ensureColumn("groups", "category", "TEXT NOT NULL DEFAULT 'other'");
 
 console.log(`🚀 LÖMO SQLite подключена: ${DB_PATH}`);
 

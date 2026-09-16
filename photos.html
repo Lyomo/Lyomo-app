@@ -19,21 +19,27 @@
 
       <section>
         <h2>Мои альбомы</h2>
-        <div class="media-form">
+        <div class="media-upload-row">
           <input id="albumTitleInput" placeholder="Название альбома" />
-          <button id="albumCreateBtn" class="btn primary">Создать альбом</button>
+          <button id="albumCreateBtn" class="btn primary mobile-fab-trigger">
+            <span class="btn-label">Создать альбом</span>
+            <span class="fab-icon" aria-hidden="true"><svg viewBox="0 0 24 24" width="24" height="24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 4.5v15M4.5 12h15"/></svg></span>
+          </button>
         </div>
         <div id="albumsList" class="album-list"></div>
       </section>
 
-      <section>
-        <h2 id="currentAlbumTitle">—</h2>
-        <div class="media-form">
-          <input type="file" id="photoFileInput" accept="image/*">
-          <button id="photoUploadBtn" class="btn primary">Загрузить фото</button>
+      <section id="albumPhotosSection" hidden>
+        <h2 id="currentAlbumTitle"></h2>
+        <div class="media-upload-row">
+          <label class="btn primary custom-file-upload">
+            <input type="file" id="photoFileInput" accept="image/*" hidden>
+            Загрузить фото
+          </label>
         </div>
         <div id="photoGrid" class="photo-grid"></div>
       </section>
+      <div id="noAlbumsHint"></div>
     </div>
   </div>
 

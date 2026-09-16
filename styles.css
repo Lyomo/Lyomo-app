@@ -28,6 +28,27 @@
   --shadow: rgba(0, 0, 0, 0.7);
 }
 
+/* ========== ПЕРЕХОДЫ МЕЖДУ СТРАНИЦАМИ (Cross-Document View Transitions) ==========
+   Проект многостраничный (обычная браузерная навигация через
+   window.location.href, не SPA) — без этого API переход между страницами
+   выглядит как жёсткая перезагрузка: сайдбар и шапка исчезают и
+   перерисовываются с нуля на каждый клик по меню, хотя их содержимое
+   почти не меняется. `navigation: auto` включает кросс-документные
+   переходы для всего сайта одной строкой — браузер сам снимает
+   "снимок" старой и новой страницы и плавно растворяет одно в другое;
+   элементы с одинаковым view-transition-name на обеих страницах (см.
+   .sidebar/header ниже) браузер узнаёт как "один и тот же" объект и не
+   перерисовывает его вообще, оставляя на месте.
+   Работает только в Chromium (Chrome/Edge) на момент внедрения — это
+   PROGRESSIVE ENHANCEMENT, не обязательное условие: в браузерах без
+   поддержки правило просто игнорируется, переход остаётся обычной
+   перезагрузкой страницы (и её слегка сглаживает CSS-анимация
+   `.app`/`.auth-shell` ниже, см. @keyframes fadeInUp). Никакого JS,
+   никакой деградации функциональности — чистое CSS-улучшение. */
+@view-transition {
+  navigation: auto;
+}
+
 /* ========== ГЛОБАЛЬНОЕ ========== */
 * {
   box-sizing: border-box;
@@ -70,8 +91,14 @@ body {
 }
 
 /* Простые анимации */
+/* Раньше 20px/0.4s/ease — по фидбеку от дизайн-ревью (см. CLAUDE.md)
+   ощущалось как "рывок", а не плавность: в вебе всё, что дольше ~0.25s
+   для обычной UI-навигации, начинает читаться как тормоза, а не
+   плавность. 8px/0.2s + свой cubic-bezier (быстрый старт, мягкое
+   торможение в конце, ease/ease-in-out для появления элементов не
+   годится — там ускорение в начале, которое и даёт ощущение рывка). */
 @keyframes fadeInUp {
-  from { opacity: 0; transform: translateY(20px); }
+  from { opacity: 0; transform: translateY(8px); }
   to   { opacity: 1; transform: translateY(0); }
 }
 
@@ -87,6 +114,69 @@ button {
   color: inherit;
 }
 
+/* Вторичный текст (даты, ID, подписи полей, счётчики) — .meta проставлен
+   в разметке ПОВСЕМЕСТНО (app.js/components.js), но до этого правила не
+   имел ни одного глобального стиля — просто наследовал обычный цвет
+   текста. Из-за этого весь интерфейс читался "одним весом" без
+   иерархии (по фидбеку от дизайн-ревью). Два уже существующих локальных
+   переопределения (.msg-bubble .meta, .users-header .meta) сами по себе
+   и так задавали var(--muted) — это правило просто делает то же самое
+   базовым поведением для класса, а не исключением. */
+.meta {
+  color: var(--muted);
+  font-size: 13px;
+}
+
+/* Тот же пробел, что и у .meta выше — class="muted" используется в
+   app.js повсеместно (пустые списки, подписи, служебные пометки), но
+   тоже не имел НИ ОДНОГО css-правила нигде в файле до этого момента. */
+.muted {
+  color: var(--muted);
+}
+
+/* Единый вид "тут пока пусто" — иконка + текст + (опционально) кнопка
+   действия, вместо голой строки текста в никуда. См. renderEmptyState()
+   в app.js. */
+/* renderEmptyState() (app.js) кладёт этот блок прямо внутрь списков вроде
+   .video-grid/.book-grid/.group-list/.photo-grid — а они display:grid с
+   несколькими узкими колонками. Без grid-column блок становился ОДНИМ
+   элементом сетки и занимал ширину только первой колонки (~200px), а не
+   всей строки — align-items:center центрировал иконку/текст внутри этой
+   узкой колонки, из-за чего пустое состояние выглядело прижатым влево, а
+   не по центру страницы. grid-column: 1 / -1 растягивает блок на все
+   колонки; на не-grid родителях (.wall, .person-list и т.п.) свойство
+   просто ничего не делает. */
+.empty-state {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  text-align: center;
+  gap: 10px;
+  padding: 32px 16px;
+  color: var(--muted);
+  grid-column: 1 / -1;
+}
+
+.empty-state-icon {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 56px;
+  height: 56px;
+  border-radius: 999px;
+  background: rgba(148,163,184,0.14);
+  color: var(--muted);
+}
+
+.dark .empty-state-icon {
+  background: rgba(148,163,184,0.18);
+}
+
+.empty-state p {
+  margin: 0;
+  max-width: 320px;
+}
+
 /* Инлайн SVG-иконки (см. icon() в components.js) — не сжимаются в flex и
    не проваливаются в клики мимо родительской кнопки */
 .icon {
@@ -98,6 +188,18 @@ button {
 .layout {
   height: 100%;
   display: flex;
+  /* На широких мониторах (условно ≥1500px, обычный .app раньше просто
+     растягивался на всю доступную ширину flex-ом) содержимое конкретных
+     страниц (.wall — max-width:640px, .group-list с auto-fill и малым
+     числом карточек и т.д.) всё равно не растёт бесконечно — в итоге
+     справа оставалась одна сплошная пустая зона, а не симметричные поля.
+     max-width + margin:auto на самом .layout центрирует ВСЁ (сайдбар +
+     контент) единым блоком — пустое место распределяется поровну по
+     краям экрана, как в большинстве соцсетей, вместо того чтобы копиться
+     с одной стороны. Ниже 1500px ничего не меняется — .layout и так
+     всегда уже своего max-width. */
+  max-width: 1500px;
+  margin: 0 auto;
 }
 
 /* ========== SIDEBAR (GLASS) ========== */
@@ -117,7 +219,20 @@ button {
      окне пункты меню обрезались/наезжали друг на друга без возможности
      докрутить. */
   overflow-y: auto;
-  animation: fadeInUp 0.4s ease;
+  /* Раньше был fadeInUp на каждой загрузке страницы — но содержимое
+     сайдбара между страницами почти не меняется (только подсветка
+     активного пункта), а сама навигация в этом проекте — обычная
+     браузерная перезагрузка документа (не SPA), значит анимация
+     проигрывалась заново при КАЖДОМ переходе. Постоянно выезжающий/
+     проявляющийся сайдбар на каждый клик по меню ощущается как
+     укачивание, а не плавность (см. консультацию с дизайн-ревью в
+     CLAUDE.md) — теперь просто появляется сразу. Для браузеров с
+     поддержкой Cross-Document View Transitions (см. ниже) сайдбар и
+     вовсе не перерисовывается — остаётся на месте между страницами.
+     view-transition-name — общее "имя" элемента для браузера: одна и та
+     же строка на одноимённом элементе старой и новой страницы говорит
+     "это один и тот же объект, не перерисовывай его с нуля". */
+  view-transition-name: main-sidebar;
 }
 
 .dark .sidebar {
@@ -382,7 +497,12 @@ button {
   display: flex;
   flex-direction: column;
   padding: 20px 24px;
-  animation: fadeInUp 0.4s ease;
+  /* 0.2s + свой cubic-bezier вместо 0.4s/ease — см. @keyframes fadeInUp
+     выше про то, почему. Это фоллбэк на случай, если у браузера нет
+     Cross-Document View Transitions (Firefox/Safari на момент захода) —
+     там при переходе между страницами всё равно проигрывается обычная
+     перезагрузка, эта анимация её немного сглаживает. */
+  animation: fadeInUp 0.2s cubic-bezier(0.2, 0.8, 0.2, 1);
   min-width: 0;
   overflow-y: auto;
 }
@@ -394,6 +514,12 @@ header {
   justify-content: space-between;
   align-items: center;
   margin-bottom: 16px;
+  /* Тот же смысл, что у view-transition-name на .sidebar выше — ровно
+     один <header> на страницу (и на обычных страницах, и на auth.html,
+     где это .auth-shell-header — тоже элемент <header>), общее имя,
+     чтобы браузер узнавал "тот же" хедер между разными документами при
+     переходе и не перерисовывал его с нуля. */
+  view-transition-name: main-header;
 }
 
 header h1 {
@@ -494,6 +620,146 @@ textarea:focus {
   box-shadow: 0 0 0 1px rgba(34,197,94,0.35);
 }
 
+/* ========== ГЛОБАЛЬНЫЙ <select> + кастомная выпадашка ==========
+   До этого select нигде в проекте не стилизовался — рендерился голым
+   элементом ОС. Первый заход дал самому select/закрытому состоянию свой
+   вид (appearance:none + своя стрелка через background-image, тем же
+   SVG-путём, что и chevronDown в ICON_PATHS). Сам ПОПАП нативного select
+   рисует ОС/браузер — CSS до него не достаёт (кроме фона/цвета option,
+   ниже), поэтому там, где выпадающий список должен выглядеть "по-нашему"
+   целиком (Группы: сортировка/категория, Книги: статус), реальный
+   <select> подменяется кнопкой-триггером + своим div-списком через
+   enhanceSelect() в app.js — сам <select> остаётся в DOM (просто
+   спрятан) и по-прежнему источник истины (.value/"change"), весь код,
+   который на него завязан, написан раньше и ничего не знает про подмену.
+   .custom-select-trigger специально стоит в одном списке селекторов с
+   select — визуально это должна быть одна и та же "закрытая" кнопка. */
+select,
+.custom-select-trigger {
+  font-family: inherit;
+  color: var(--fg);
+  background-color: rgba(255,255,255,0.8);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  padding: 7px 30px 7px 12px;
+  outline: none;
+  cursor: pointer;
+  appearance: none;
+  -webkit-appearance: none;
+  -moz-appearance: none;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%236b7280' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M6 9l6 6 6-6'/%3E%3C/svg%3E");
+  background-repeat: no-repeat;
+  background-position: right 8px center;
+  background-size: 16px;
+  transition: border-color var(--transition-fast), box-shadow var(--transition-fast), background-color var(--transition-fast), color var(--transition-fast);
+}
+
+.custom-select-trigger {
+  display: inline-flex;
+  align-items: center;
+  text-align: left;
+  white-space: nowrap;
+}
+
+select::-ms-expand {
+  display: none;
+}
+
+select:hover,
+.custom-select-trigger:hover {
+  border-color: var(--primary);
+}
+
+select:focus,
+.custom-select-trigger:focus,
+.custom-select.open .custom-select-trigger {
+  border-color: var(--primary);
+  box-shadow: 0 0 0 1px rgba(34,197,94,0.35);
+}
+
+/* Сам выпадающий список опций select рисует ОС/браузер, а не наш CSS —
+   но фон/цвет самих <option> Chrome и Firefox всё же учитывают, поэтому
+   задаём и их на случай необогащённых select (запасной вариант, если
+   где-то enhanceSelect() не позвали). */
+select option {
+  background: var(--chip);
+  color: var(--fg);
+}
+
+.dark select,
+.dark .custom-select-trigger {
+  background-color: rgba(15,23,42,0.9);
+  border-color: #1f2937;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%239ca3af' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M6 9l6 6 6-6'/%3E%3C/svg%3E");
+}
+
+/* Обёртка + сам кастомный попап (enhanceSelect() в app.js). Настоящий
+   select лежит внутри .custom-select абсолютным позиционированием на
+   всю обёртку — невидим (opacity:0) и некликабелен (pointer-events:none),
+   но остаётся в DOM ради .value/"change"; вся видимая часть — соседний
+   .custom-select-trigger + .custom-select-menu. */
+.custom-select {
+  position: relative;
+  display: inline-block;
+}
+
+.custom-select-native {
+  position: absolute;
+  inset: 0;
+  opacity: 0;
+  pointer-events: none;
+}
+
+/* position:fixed + top/left/min-width выставляются в JS (positionMenu() в
+   enhanceSelect(), app.js) из getBoundingClientRect() триггера — не
+   position:absolute относительно .custom-select, иначе список обрезался
+   бы по границе первого скроллящегося/overflow:hidden предка (реальный
+   случай: .create-group-modal с overflow-y:auto). */
+.custom-select-menu {
+  position: fixed;
+  /* Меню теперь лежит прямо в document.body (см. enhanceSelect() в
+     app.js — причина та же история с containing block), а значит его
+     z-index сравнивается уже не с соседями внутри модалки, а НАПРЯМУЮ с
+     .story-viewer-overlay (z-index:10000) как с соседним по body
+     элементом — обязано быть выше него, иначе выпадашка категории в
+     модалке создания группы рисуется ПОД самой модалкой. */
+  z-index: 10001;
+  max-height: 240px;
+  overflow-y: auto;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  box-shadow: 0 12px 30px rgba(0,0,0,0.25);
+  padding: 4px;
+}
+
+.custom-select-option {
+  display: block;
+  width: 100%;
+  padding: 8px 10px;
+  border: none;
+  border-radius: var(--radius-sm);
+  background: none;
+  color: var(--fg);
+  text-align: left;
+  cursor: pointer;
+  font-size: 14px;
+  white-space: nowrap;
+}
+
+.custom-select-option:hover {
+  background: rgba(148,163,184,0.14);
+}
+
+.custom-select-option.active {
+  color: var(--primary-dark);
+  font-weight: 600;
+}
+
+.dark .custom-select-option.active {
+  color: var(--primary);
+}
+
 /* ========== КНОПКИ ========== */
 
 .btn {
@@ -558,6 +824,56 @@ textarea:focus {
   box-shadow: 0 10px 22px rgba(22,163,74,0.75);
 }
 
+/* ========== ПЛАВАЮЩАЯ КНОПКА "+" НА МОБИЛЬНОМ (FAB) ==========
+   Основные кнопки "Создать"/"Добавить" (группа, книга, альбом, трек,
+   видео) на телефоне раньше стояли в обычном потоке страницы — то есть
+   в самом верху, куда неудобно тянуться пальцем при длинном списке ниже.
+   На мобильном такая кнопка превращается в плавающий кружок с одним "+"
+   в правом нижнем углу — стандартный паттерн (Telegram/Gmail/большинство
+   мобильных приложений), тянуться удобнее. На десктопе `.mobile-fab-trigger`
+   ничего не меняет — обычная кнопка в потоке страницы с текстом, как и
+   было. Разметка кнопки-кандидата: `<span class="btn-label">текст</span>`
+   + `<span class="fab-icon">свг-плюс</span>` рядом — на десктопе виден
+   только текст, на мобильном свап показывает только иконку.
+   НЕ применяется в chats.html ("+ Комната") — это осознанное исключение
+   по прямой просьбе пользователя: плавающий FAB поверх ленты диалогов или
+   переписки перекрывал бы сообщения/список комнат, там уже есть кнопка
+   на своём месте в тулбаре списка. */
+.fab-icon {
+  display: none;
+}
+
+@media (max-width: 768px) {
+  .mobile-fab-trigger {
+    position: fixed;
+    right: 20px;
+    bottom: 20px;
+    /* Выше обычного контента страницы, но ниже мобильного сайдбара (50)
+       и его тёмной подложки (40) — когда открыто выезжающее меню, FAB
+       должен спрятаться под затемнением, а не плавать поверх него. */
+    z-index: 30;
+    width: 56px;
+    height: 56px;
+    padding: 0;
+    border-radius: 999px;
+    box-shadow: 0 8px 20px rgba(15,23,42,0.35);
+  }
+
+  .mobile-fab-trigger .btn-label {
+    display: none;
+  }
+
+  .mobile-fab-trigger .fab-icon {
+    display: flex;
+  }
+
+  /* На music.html внизу экрана может быть открыт мини-плеер (.mini-player,
+     ~60px) — без сдвига FAB "Загрузить трек" сидел бы прямо на нём. */
+  #musicUploadTrigger.mobile-fab-trigger {
+    bottom: 90px;
+  }
+}
+
 /* Круглая кнопка прикрепить 📎 */
 .btn-attach {
   width: 38px;
@@ -614,6 +930,280 @@ textarea:focus {
 
 .auth input {
   width: 260px;
+}
+
+/* ========== ВХОД / РЕГИСТРАЦИЯ (auth.html) ========== */
+
+/* Эта страница — единственная без .layout/.sidebar/.app: залогиненного
+   пользователя тут по определению нет, значит нет и смысла в навигации по
+   разделам — оставили только бренд-шапку (лого + тема) и саму карточку
+   входа/регистрации по центру экрана. */
+.auth-shell {
+  height: 100%;
+  max-width: 1500px;
+  margin: 0 auto;
+  display: flex;
+  flex-direction: column;
+  padding: 20px 24px;
+  overflow-y: auto;
+  animation: fadeInUp 0.2s cubic-bezier(0.2, 0.8, 0.2, 1);
+}
+
+.auth-shell-header {
+  flex: 0 0 auto;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 16px;
+}
+
+/* flex:1 1 auto растягивает эту секцию на всю высоту между шапкой и низом
+   экрана, align-items:center + justify-content:center центрируют карточку
+   и по вертикали, и по горизонтали (раньше было только по горизонтали,
+   карточка держалась у верха через padding-top). */
+.auth-page {
+  flex: 1 1 auto;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.auth-card {
+  width: 100%;
+  max-width: 380px;
+  padding: 20px;
+  border-radius: var(--radius-lg);
+  background: var(--chip);
+  border: 1px solid rgba(255,255,255,0.5);
+  box-shadow: 0 12px 28px var(--shadow);
+  backdrop-filter: blur(18px);
+}
+
+.auth-card .tabs {
+  margin-bottom: 16px;
+}
+
+.auth-panel label {
+  display: block;
+  margin-bottom: 10px;
+}
+
+.auth-name-row {
+  display: flex;
+  gap: 10px;
+}
+
+.auth-name-row label {
+  flex: 1 1 0;
+  min-width: 0;
+}
+
+.auth-panel input {
+  width: 100%;
+}
+
+.auth-panel button[type="submit"] {
+  width: 100%;
+  margin-top: 4px;
+}
+
+.auth-panel button[type="submit"]:disabled {
+  opacity: 0.7;
+  cursor: default;
+}
+
+.password-field {
+  position: relative;
+}
+
+.password-field input {
+  padding-right: 40px;
+}
+
+.password-toggle-btn {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  right: 4px;
+  width: 32px;
+  border: none;
+  background: none;
+  color: var(--muted);
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: color .15s ease, transform .15s ease;
+}
+
+.password-toggle-btn:hover {
+  color: var(--fg);
+}
+
+/* Пока человек печатает пароль, глазик из блёклого "muted" становится
+   явно видимым — раньше выглядел одинаково незаметно что при вводе, что
+   в пустом поле, и не было понятно, что кнопка вообще рабочая/на что-то
+   влияет прямо сейчас. :focus-within на .password-field (а не :focus на
+   самом инпуте — глазик его сосед, не потомок) safely покрывает и
+   обычный клик в поле, и Tab-навигацию. */
+.password-field:focus-within .password-toggle-btn {
+  color: var(--fg);
+}
+
+/* Когда пароль реально показан (type="text") — глазик подсвечен акцентным
+   цветом и слегка увеличен, чтобы "включённое" состояние было заметно и
+   после того, как поле потеряло фокус, а не только пока печатаешь.
+   Класс "active" ставит/снимает сам JS-обработчик клика (см. initAuthPage()
+   в app.js) синхронно с переключением type пароля.
+   Селектор специально `.password-field .password-toggle-btn.active`, а не
+   просто `.password-toggle-btn.active` — иначе он проигрывает по
+   специфичности правилу `:focus-within` выше (оба должны совпадать по
+   специфичности, тогда побеждает более позднее объявление ниже по файлу):
+   после клика по самому глазику браузер оставляет фокус НА КНОПКЕ, значит
+   `:focus-within` всё ещё истинно, и без этого выравнивания specificity
+   активный акцентный цвет никогда бы не показывался. */
+.password-field .password-toggle-btn.active {
+  color: var(--primary-dark);
+  transform: scale(1.1);
+}
+
+.dark .password-toggle-btn.active {
+  color: var(--primary);
+}
+
+.field-hint {
+  margin-top: 4px;
+  font-size: 12px;
+  color: var(--muted);
+}
+
+.field-hint.error {
+  color: #b91c1c;
+}
+
+.dark .field-hint.error {
+  color: #fca5a5;
+}
+
+.field-hint.ok {
+  color: #15803d;
+}
+
+.dark .field-hint.ok {
+  color: #4ade80;
+}
+
+.auth-note {
+  font-size: 12px;
+  color: var(--muted);
+  background: rgba(148,163,184,0.15);
+  border-radius: var(--radius-sm);
+  padding: 8px 10px;
+  margin: 2px 0 14px;
+}
+
+/* Honeypot-поле формы регистрации (regWebsite в auth.html) — намеренно
+   НЕ через display:none/[hidden], часть простых ботов проверяет именно
+   эти два признака перед тем как решить, заполнять поле или нет. Уводим
+   за пределы экрана — реальный человек его никогда не увидит, а бот,
+   слепо заполняющий все поля формы, попадётся. */
+.hp-field {
+  position: absolute;
+  left: -9999px;
+  top: -9999px;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+}
+
+.auth-error {
+  font-size: 13px;
+  color: #b91c1c;
+  background: rgba(239,68,68,0.14);
+  border-radius: var(--radius-sm);
+  padding: 8px 10px;
+  margin-bottom: 14px;
+}
+
+.dark .auth-error {
+  color: #fca5a5;
+}
+
+/* Чекбокс согласия с пользовательским соглашением — обычный .auth-panel
+   label задаёт display:block (одно поле в столбик), тут нужен ряд
+   "чекбокс + текст", поэтому селектор конкретнее (label.auth-consent), а
+   не !important — так проще на будущее переопределить ещё раз при нужде. */
+.auth-panel label.auth-consent {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  margin-bottom: 14px;
+  font-size: 13px;
+  color: var(--muted);
+  cursor: pointer;
+}
+
+.auth-consent input {
+  width: auto;
+  flex: 0 0 auto;
+  margin-top: 2px;
+}
+
+/* Кнопка, выглядящая как ссылка — открывает модалку пользовательского
+   соглашения (openTermsModal() в app.js). base-правило "a, button {
+   text-decoration:none !important}" иначе съедает подчёркивание — тут
+   тот же приём переопределения, что уже есть у .msg-attachment-file. */
+.link-btn {
+  background: none;
+  border: none;
+  padding: 0;
+  font: inherit;
+  color: var(--primary-dark);
+  text-decoration: underline !important;
+  cursor: pointer;
+}
+
+.dark .link-btn {
+  color: var(--primary);
+}
+
+/* Модалка пользовательского соглашения — переиспользует .story-viewer-overlay
+   как фон (тот же паттерн, что у лайтбокса фото/визитки собеседника/
+   "Информации о группе"), .contact-card-close для крестика и .tabs/.tab-btn
+   для переключателя языка (RU/UA/EN/ES). */
+.terms-modal {
+  position: relative;
+  width: min(640px, 92vw);
+  max-height: 86vh;
+  display: flex;
+  flex-direction: column;
+  background: var(--chip);
+  border-radius: var(--radius-lg);
+  box-shadow: 0 20px 60px rgba(0,0,0,0.5);
+  overflow: hidden;
+  text-align: left;
+}
+
+.terms-modal-langs {
+  flex: 0 0 auto;
+  padding: 20px 44px 0 20px;
+}
+
+.terms-modal-body {
+  flex: 1 1 auto;
+  overflow-y: auto;
+  padding: 14px 20px 20px;
+  font-size: 14px;
+  line-height: 1.6;
+}
+
+.terms-modal-body h3 {
+  margin: 0 0 10px;
+  font-size: 16px;
+}
+
+.terms-modal-body p {
+  margin: 0 0 10px;
 }
 
 /* ========== HOME / ПРОФИЛЬ ========== */
@@ -1569,44 +2159,300 @@ textarea:focus {
 
 /* ========== MEDIA (music / video / books / группы / фото — форма+список) ========== */
 
-.media-form {
+/* ========== МУЗЫКА / ВИДЕО / КНИГИ (music.html / video.html / books.html) ==========
+   Раньше — заглушка (список строк в localStorage), теперь настоящая
+   загрузка файлов через /uploads (та же инфраструктура, что у фото/чата).
+   См. initMusicPage()/initVideoPage()/initBooksPage() в app.js. */
+
+.media-upload-row {
   display: flex;
   flex-wrap: wrap;
   gap: 8px;
   margin: 12px 0;
 }
 
-.media-form input {
+.media-upload-row input {
   flex: 1;
   min-width: 160px;
 }
 
-.media-list {
-  list-style: none;
-  margin: 0;
-  padding: 0;
-  display: flex;
-  flex-direction: column;
+/* Прячем уродливый нативный file-input, красим <label> как обычную
+   кнопку — сам input остаётся кликабельным (label связан с input по
+   вложенности), просто не виден. */
+.custom-file-upload {
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
   gap: 6px;
 }
 
-.media-list li {
+.media-add-form {
   display: flex;
-  justify-content: space-between;
-  align-items: center;
+  flex-direction: column;
   gap: 8px;
-  padding: 9px 12px;
-  border-radius: var(--radius-md);
+  max-width: 360px;
+  margin: 0 0 16px;
+  padding: 14px;
+  border-radius: var(--radius-lg);
   background: var(--chip);
   border: 1px solid rgba(255,255,255,0.5);
+  backdrop-filter: blur(16px);
 }
 
-.dark .media-list li {
+.dark .media-add-form {
   border-color: var(--border);
 }
 
-.media-list li span {
-  overflow-wrap: anywhere;
+.media-add-form-actions {
+  display: flex;
+  gap: 8px;
+  margin-top: 4px;
+}
+
+/* --- Треки (список) --- */
+.track-list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding-bottom: 72px; /* место под sticky mini-player снизу */
+}
+
+.track-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 10px 12px;
+  border-radius: var(--radius-md);
+  background: var(--chip);
+  border: 1px solid rgba(255,255,255,0.5);
+  transition: background var(--transition-fast);
+}
+
+.dark .track-row {
+  border-color: var(--border);
+}
+
+.track-row.playing {
+  border-color: var(--primary);
+  background: rgba(34,197,94,0.1);
+}
+
+.track-play-btn {
+  flex: 0 0 auto;
+  width: 36px;
+  height: 36px;
+  border-radius: 999px;
+  border: none;
+  background: var(--primary);
+  color: #fff;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+}
+
+.track-info {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.track-title {
+  font-weight: 600;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.track-artist {
+  font-size: 12px;
+}
+
+.track-delete-btn {
+  flex: 0 0 auto;
+  padding: 6px 10px;
+}
+
+/* --- Мини-плеер, прилипает к низу области контента --- */
+.mini-player {
+  position: sticky;
+  bottom: 0;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 10px 16px;
+  margin: 0 -24px -20px;
+  background: var(--chip);
+  border-top: 1px solid rgba(255,255,255,0.5);
+  backdrop-filter: blur(18px);
+}
+
+.dark .mini-player {
+  border-top-color: var(--border);
+}
+
+.mini-player-toggle {
+  flex: 0 0 auto;
+  width: 40px;
+  height: 40px;
+  border-radius: 999px;
+  border: none;
+  background: var(--primary);
+  color: #fff;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+}
+
+.mini-player-info {
+  min-width: 0;
+}
+
+.mini-player-title {
+  font-weight: 600;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.mini-player-artist {
+  font-size: 12px;
+}
+
+/* --- Видео (сетка карточек) --- */
+.video-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+  gap: 14px;
+}
+
+.video-card {
+  position: relative;
+  border-radius: var(--radius-lg);
+  background: var(--chip);
+  border: 1px solid rgba(255,255,255,0.5);
+  overflow: hidden;
+  transition: box-shadow var(--transition-med), transform var(--transition-med);
+}
+
+.dark .video-card {
+  border-color: var(--border);
+}
+
+.video-card:hover {
+  box-shadow: 0 12px 28px var(--shadow);
+  transform: translateY(-2px);
+}
+
+.video-card-thumb {
+  height: 110px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(148,163,184,0.16);
+  color: var(--muted);
+  cursor: pointer;
+}
+
+.video-card-title {
+  padding: 8px 10px;
+  font-size: 13px;
+  font-weight: 600;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.video-card-delete {
+  position: absolute;
+  top: 6px;
+  right: 6px;
+  padding: 5px 8px;
+  background: rgba(15,23,42,0.55);
+  color: #fff;
+}
+
+.video-player-wrap {
+  position: relative;
+  width: min(900px, 92vw);
+}
+
+.video-player {
+  width: 100%;
+  aspect-ratio: 16 / 9;
+  border-radius: var(--radius-md);
+  background: #000;
+  display: block;
+}
+
+/* --- Книги (сетка карточек) --- */
+.book-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+  gap: 14px;
+  margin-top: 12px;
+}
+
+.book-card {
+  display: flex;
+  gap: 10px;
+  padding: 12px;
+  border-radius: var(--radius-lg);
+  background: var(--chip);
+  border: 1px solid rgba(255,255,255,0.5);
+  transition: box-shadow var(--transition-med), transform var(--transition-med);
+}
+
+.dark .book-card {
+  border-color: var(--border);
+}
+
+.book-card:hover {
+  box-shadow: 0 12px 28px var(--shadow);
+  transform: translateY(-2px);
+}
+
+.book-card-cover {
+  flex: 0 0 auto;
+  width: 56px;
+  height: 80px;
+  border-radius: var(--radius-sm);
+  background-size: cover;
+  background-position: center;
+  background-color: rgba(148,163,184,0.2);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--muted);
+}
+
+.book-card-info {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.book-card-title {
+  font-weight: 600;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+}
+
+.book-card-actions {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  flex: 0 0 auto;
+}
+
+.book-card-actions select,
+.book-card-actions .custom-select-trigger {
+  font-size: 12px;
+  padding: 4px 22px 4px 6px;
+  background-position: right 4px center;
+  background-size: 14px;
 }
 
 /* ========== USERS PAGE ========== */
@@ -1714,6 +2560,25 @@ textarea:focus {
 }
 
 /* ========== АДМИНКА: статистика, модерация ========== */
+
+/* Редактор пользовательского соглашения (initAdminTermsEditor() в app.js) —
+   textarea хранит по одному пункту соглашения на строку, тот же формат,
+   в котором его отдаёт/принимает API (terms_content.body, "\n"-разделитель). */
+.admin-terms-editor label {
+  display: block;
+  margin: 12px 0;
+}
+
+.admin-terms-editor input,
+.admin-terms-editor textarea {
+  width: 100%;
+}
+
+.admin-terms-editor textarea {
+  resize: vertical;
+  line-height: 1.5;
+  font-size: 13px;
+}
 
 .admin-stats {
   display: grid;
@@ -2761,6 +3626,12 @@ textarea:focus {
   box-shadow: 0 8px 20px var(--shadow);
   backdrop-filter: blur(16px);
   margin-bottom: 12px;
+  transition: box-shadow var(--transition-med), transform var(--transition-med);
+}
+
+.post-card:hover {
+  box-shadow: 0 12px 28px var(--shadow);
+  transform: translateY(-2px);
 }
 
 .dark .post-card {
@@ -2951,6 +3822,11 @@ textarea:focus {
   padding: 8px 10px;
   border-radius: var(--radius-md);
   background: rgba(148,163,184,0.1);
+  transition: background var(--transition-fast);
+}
+
+.person-row:hover {
+  background: rgba(148,163,184,0.2);
 }
 
 .person-row .person-link {
@@ -2959,6 +3835,10 @@ textarea:focus {
 
 .dark .person-row {
   background: rgba(15,23,42,0.6);
+}
+
+.dark .person-row:hover {
+  background: rgba(15,23,42,0.85);
 }
 
 .person-link {
@@ -3006,15 +3886,45 @@ textarea:focus {
   border: 1px solid rgba(255,255,255,0.5);
   box-shadow: 0 8px 20px var(--shadow);
   backdrop-filter: blur(16px);
+  transition: box-shadow var(--transition-med), transform var(--transition-med);
+}
+
+.group-card:hover {
+  box-shadow: 0 12px 28px var(--shadow);
+  transform: translateY(-2px);
 }
 
 .dark .group-card {
   border-color: var(--border);
 }
 
+.group-card-header {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.group-avatar {
+  width: 40px;
+  height: 40px;
+  border-radius: 999px;
+  background: rgba(148,163,184,0.35) center/cover no-repeat;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 15px;
+  font-weight: 700;
+  color: var(--muted);
+  flex: 0 0 auto;
+}
+
 .group-name {
   font-weight: 700;
   font-size: 16px;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .group-description {
@@ -3023,9 +3933,134 @@ textarea:focus {
   font-size: 13px;
 }
 
+.group-card-footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin-top: 4px;
+}
+
+.group-category-badge {
+  cursor: default;
+}
+
 .group-members-count {
   font-size: 12px;
   margin: 0;
+}
+
+/* ========== ГРУППЫ: панель поиска/фильтров (groups.html) ========== */
+
+/* Заголовок "Группы" уже рендерит #headerRoot (из <title> страницы, см.
+   renderHeader() в components.js) — второй <h2> с тем же текстом здесь
+   раньше дублировал его визуально прямо под шапкой. Кнопка теперь одна
+   в строке, прижата вправо. */
+.groups-toolbar-top {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.groups-search-row {
+  display: flex;
+  gap: 8px;
+  margin: 12px 0;
+}
+
+.groups-search-row input {
+  flex: 1;
+  min-width: 160px;
+}
+
+.groups-filter-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin: 10px 0;
+  flex-wrap: wrap;
+}
+
+.chip-row {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.chip {
+  border: 1px solid var(--border);
+  background: var(--chip);
+  color: var(--fg);
+  border-radius: 999px;
+  padding: 5px 12px;
+  font-size: 13px;
+  cursor: pointer;
+  transition: background .15s ease, border-color .15s ease, color .15s ease;
+  flex: 0 0 auto;
+}
+
+.chip:hover {
+  border-color: var(--primary);
+}
+
+.chip.active {
+  background: var(--primary);
+  border-color: var(--primary);
+  color: #fff;
+}
+
+/* Модалка создания группы — по образцу канала в Telegram (см. CLAUDE.md):
+   аватар (необязательная ссылка) сверху, название/описание/категория,
+   кнопки внизу. Переиспользует .story-viewer-overlay как фон и
+   .contact-card-close для крестика, как и другие JS-модалки в проекте. */
+.create-group-modal {
+  position: relative;
+  width: min(420px, 92vw);
+  max-height: 88vh;
+  overflow-y: auto;
+  background: var(--chip);
+  border-radius: var(--radius-lg);
+  padding: 24px 20px 20px;
+  box-shadow: 0 20px 60px rgba(0,0,0,0.5);
+  text-align: left;
+}
+
+.create-group-modal h2 {
+  margin: 0 0 16px;
+  font-size: 18px;
+  text-align: center;
+}
+
+.create-group-modal label {
+  display: block;
+  margin-top: 14px;
+}
+
+.create-group-modal input,
+.create-group-modal textarea,
+.create-group-modal select {
+  width: 100%;
+}
+
+.create-group-modal .custom-select,
+.create-group-modal .custom-select-trigger {
+  display: block;
+  width: 100%;
+}
+
+.create-group-modal textarea {
+  resize: none;
+}
+
+.create-group-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  margin-top: 18px;
 }
 
 /* ========== ФОТОАЛЬБОМЫ ========== */

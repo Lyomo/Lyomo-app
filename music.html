@@ -19,15 +19,36 @@
 
       <section>
         <h2>Музыка</h2>
-        <p class="muted">Сохраняй здесь любимые треки или ссылки на музыку.</p>
+        <p class="muted">Твои треки — загружай и слушай прямо здесь.</p>
 
-        <div class="media-form">
-          <input id="musicInput" placeholder="Название трека или ссылка..." />
-          <button id="musicAdd" class="btn primary">Добавить</button>
+        <div class="media-upload-row">
+          <label id="musicUploadTrigger" class="btn primary custom-file-upload mobile-fab-trigger">
+            <input type="file" id="musicFileInput" accept="audio/*" hidden>
+            <span class="btn-label">Загрузить трек</span>
+            <span class="fab-icon" aria-hidden="true"><svg viewBox="0 0 24 24" width="24" height="24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 4.5v15M4.5 12h15"/></svg></span>
+          </label>
         </div>
 
-        <ul id="musicList" class="media-list"></ul>
+        <div id="musicAddForm" class="media-add-form" hidden>
+          <input id="musicTitleInput" placeholder="Название трека">
+          <input id="musicArtistInput" placeholder="Исполнитель (необязательно)">
+          <div class="media-add-form-actions">
+            <button id="musicConfirmAdd" class="btn primary">Добавить</button>
+            <button id="musicCancelAdd" class="btn">Отмена</button>
+          </div>
+        </div>
+
+        <div id="musicList" class="track-list"></div>
       </section>
+
+      <div id="musicPlayerBar" class="mini-player" hidden>
+        <button type="button" id="musicPlayerToggle" class="mini-player-toggle"></button>
+        <div class="mini-player-info">
+          <div id="musicPlayerTitle" class="mini-player-title"></div>
+          <div id="musicPlayerArtist" class="mini-player-artist meta"></div>
+        </div>
+        <audio id="musicAudioEl"></audio>
+      </div>
     </div>
   </div>
 

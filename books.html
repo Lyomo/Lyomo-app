@@ -18,15 +18,30 @@
       <header id="headerRoot"></header>
 
       <section>
-        <h2>Книги</h2>
-        <p class="muted">Список прочитанных и желанных книг.</p>
+        <p class="muted">Твоя личная библиотека для чтения.</p>
 
-        <div class="media-form">
-          <input id="booksInput" placeholder="Название книги или автор..." />
-          <button id="booksAdd" class="btn primary">Добавить</button>
+        <button type="button" id="bookAddBtn" class="btn primary mobile-fab-trigger">
+          <span class="btn-label">+ Добавить книгу</span>
+          <span class="fab-icon" aria-hidden="true"><svg viewBox="0 0 24 24" width="24" height="24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 4.5v15M4.5 12h15"/></svg></span>
+        </button>
+
+        <div id="bookAddForm" class="media-add-form" hidden>
+          <input id="bookTitleInput" placeholder="Название">
+          <input id="bookAuthorInput" placeholder="Автор (необязательно)">
+          <input id="bookCoverInput" placeholder="Ссылка на обложку (необязательно)">
+          <input id="bookLinkInput" placeholder="Ссылка для чтения (необязательно)">
+          <div class="media-add-form-actions">
+            <button id="bookConfirmAdd" class="btn primary">Добавить</button>
+            <button id="bookCancelAdd" class="btn">Отмена</button>
+          </div>
         </div>
 
-        <ul id="booksList" class="media-list"></ul>
+        <div class="tabs" id="booksTabs">
+          <button type="button" class="tab-btn active" data-status="want">Хочу прочитать</button>
+          <button type="button" class="tab-btn" data-status="reading">Читаю</button>
+          <button type="button" class="tab-btn" data-status="done">Прочитано</button>
+        </div>
+        <div id="bookList" class="book-grid"></div>
       </section>
     </div>
   </div>

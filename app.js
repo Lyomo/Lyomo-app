@@ -297,103 +297,360 @@ function initCommonNav() {
 // AUTH (auth.html)
 // ========================
 
-function initAuthPage() {
-  applyThemeFromStorage();
+const AUTH_LOGIN_FORMAT_RE = /^[A-Za-z0-9_.]{3,32}$/;
+// Имя/фамилия — любой алфавит (\p{L}), плюс дефис/апостроф для составных
+// имён. Тот же regex, что и NAME_FORMAT_RE в server.js — сервер всё равно
+// перепроверяет сам, это только для быстрой обратной связи без похода на бэкенд.
+const AUTH_NAME_FORMAT_RE = /^\p{L}[\p{L}\-' ]{0,49}$/u;
+const AUTH_MIN_REGISTRATION_AGE = 13;
 
-  const info   = document.getElementById("authCurrent");
-  const goHome = document.getElementById("authGoHome");
-  const logout = document.getElementById("authLogout");
+// Возраст на сегодня по дате рождения "YYYY-MM-DD" (формат <input
+// type="date">) — та же логика, что и calculateAge() в server.js
+// (учитывает месяц/день, не только разницу годов), продублирована
+// намеренно: сервер всё равно перепроверяет сам при регистрации.
+function calculateAgeClient(dateStr) {
+  const [y, m, d] = dateStr.split("-").map(Number);
+  const birth = new Date(y, m - 1, d);
+  const now = new Date();
+  let age = now.getFullYear() - birth.getFullYear();
+  const monthDiff = now.getMonth() - birth.getMonth();
+  if (monthDiff < 0 || (monthDiff === 0 && now.getDate() < birth.getDate())) age--;
+  return age;
+}
 
-  const loginLogin    = document.getElementById("loginLogin");
-  const loginPassword = document.getElementById("loginPassword");
-  const loginBtn      = document.getElementById("loginBtn");
+// Человекочитаемая дата рождения ("12 марта 2000") для отображения в
+// профиле — разбирает "YYYY-MM-DD" на компоненты и строит Date из них
+// вручную (new Date("2000-03-12") парсит строку как UTC-полночь, и в
+// часовых поясах западнее UTC toLocaleDateString мог бы откатить день
+// на сутки назад).
+function formatBirthDate(dateStr) {
+  if (!dateStr) return "";
+  const [y, m, d] = dateStr.split("-").map(Number);
+  if (!y || !m || !d) return "";
+  return new Date(y, m - 1, d).toLocaleDateString("ru-RU", { day: "numeric", month: "long", year: "numeric" });
+}
 
-  const regLogin     = document.getElementById("regLogin");
-  const regPassword  = document.getElementById("regPassword");
-  const regPassword2 = document.getElementById("regPassword2");
-  const regBtn       = document.getElementById("regBtn");
+// Пользовательское соглашение — текст теперь живёт в БД (таблица
+// terms_content, см. db.js/server.js), редактируется из админки
+// (initAdminTermsEditor() ниже, admin.html). Модалка всегда загружает
+// свежие данные через GET /api/terms при каждом открытии — правки из
+// админки должны быть видны сразу, без перезагрузки/пересборки клиента.
+let termsModalLang = "ru";
 
-  const user = loadUser();
+function renderTermsBody(bodyEl, data) {
+  if (!data) {
+    bodyEl.innerHTML = `<p class="muted">Не удалось загрузить соглашение.</p>`;
+    return;
+  }
+  const paragraphs = data.body.split("\n").map((s) => s.trim()).filter(Boolean);
+  bodyEl.innerHTML = `<h3>${data.title}</h3>` + paragraphs.map((p) => `<p>${p}</p>`).join("");
+  bodyEl.scrollTop = 0;
+}
 
-  if (user) {
-    if (info) {
-      info.textContent = `Сейчас вы вошли как "${user.login}"` +
-        (user.id ? ` (ID: ${user.id}).` : ".");
-    }
-    if (goHome) {
-      goHome.style.display = "inline-block";
-      goHome.onclick = () => (window.location.href = "index.html");
-    }
-    if (logout) {
-      logout.style.display = "inline-block";
-      logout.onclick = () => {
-        clearUser();
-        alert("Вы вышли из аккаунта.");
-        window.location.reload();
-      };
-    }
-  } else {
-    if (info) {
-      info.textContent = "Вы ещё не вошли. Создайте логин и пароль или войдите.";
-    }
-    if (goHome) goHome.style.display = "none";
-    if (logout) logout.style.display = "none";
+async function openTermsModal() {
+  const overlay = document.createElement("div");
+  overlay.className = "story-viewer-overlay";
+  overlay.innerHTML = `
+    <div class="terms-modal">
+      <button type="button" class="contact-card-close" aria-label="Закрыть">
+        <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 6l12 12M18 6 6 18"/></svg>
+      </button>
+      <div class="tabs terms-modal-langs"></div>
+      <div class="terms-modal-body"><p class="muted">Загрузка...</p></div>
+    </div>
+  `;
+  document.body.appendChild(overlay);
+
+  const close = () => overlay.remove();
+  overlay.querySelector(".contact-card-close").addEventListener("click", close);
+  overlay.addEventListener("click", (e) => { if (e.target === overlay) close(); });
+  document.addEventListener("keydown", function onKey(e) {
+    if (e.key === "Escape") { close(); document.removeEventListener("keydown", onKey); }
+  });
+
+  const langsEl = overlay.querySelector(".terms-modal-langs");
+  const bodyEl  = overlay.querySelector(".terms-modal-body");
+
+  let terms;
+  try {
+    terms = await apiRequest("/api/terms");
+  } catch (err) {
+    bodyEl.innerHTML = `<p class="muted">Не удалось загрузить соглашение: ${err.message}</p>`;
+    return;
   }
 
-  if (loginBtn && loginLogin && loginPassword) {
-    loginBtn.onclick = async () => {
+  if (!terms[termsModalLang]) termsModalLang = Object.keys(terms)[0];
+
+  langsEl.innerHTML = Object.entries(terms).map(([key, d]) =>
+    `<button type="button" class="tab-btn${key === termsModalLang ? " active" : ""}" data-lang="${key}">${d.label}</button>`
+  ).join("");
+
+  langsEl.querySelectorAll(".tab-btn").forEach((btn) => {
+    btn.addEventListener("click", () => {
+      termsModalLang = btn.dataset.lang;
+      langsEl.querySelectorAll(".tab-btn").forEach((b) => b.classList.toggle("active", b === btn));
+      renderTermsBody(bodyEl, terms[termsModalLang]);
+    });
+  });
+
+  renderTermsBody(bodyEl, terms[termsModalLang]);
+}
+
+function initAuthPage() {
+  initThemeToggle();
+
+  // Уже залогинен — этой странице тут делать нечего, отправляем сразу на ленту.
+  if (loadUser()) {
+    window.location.href = "index.html";
+    return;
+  }
+
+  const errorBox = document.getElementById("authError");
+  function showAuthError(message) {
+    if (!errorBox) { alert(message); return; }
+    errorBox.textContent = message;
+    errorBox.hidden = false;
+  }
+  function hideAuthError() {
+    if (errorBox) errorBox.hidden = true;
+  }
+
+  const tabs   = document.querySelectorAll("#authTabs .tab-btn");
+  const panels = {
+    login:    document.getElementById("loginPanel"),
+    register: document.getElementById("registerPanel"),
+  };
+  tabs.forEach((btn) => {
+    btn.addEventListener("click", () => {
+      tabs.forEach((b) => b.classList.remove("active"));
+      btn.classList.add("active");
+      Object.entries(panels).forEach(([key, panel]) => {
+        if (panel) panel.hidden = key !== btn.dataset.tab;
+      });
+      hideAuthError();
+    });
+  });
+
+  // Глазик показать/скрыть пароль — один и тот же обработчик на все три поля.
+  document.querySelectorAll(".password-toggle-btn").forEach((btn) => {
+    const input   = document.getElementById(btn.dataset.target);
+    const eyeIcon = btn.querySelector(".icon-eye");
+    const offIcon = btn.querySelector(".icon-eye-off");
+    if (!input) return;
+    btn.addEventListener("click", () => {
+      const showing = input.type === "text";
+      input.type = showing ? "password" : "text";
+      if (eyeIcon) eyeIcon.hidden = !showing;
+      if (offIcon) offIcon.hidden = showing;
+      // "Активный" вид глазика (акцентный цвет, см. .password-toggle-btn.active
+      // в styles.css) — когда пароль сейчас показан как текст, а не когда
+      // просто есть фокус в поле (для этого отдельный :focus-within в CSS,
+      // без JS). !showing тут — это состояние ПОСЛЕ переключения строкой выше.
+      btn.classList.toggle("active", !showing);
+      btn.setAttribute("aria-label", showing ? "Показать пароль" : "Скрыть пароль");
+    });
+  });
+
+  // Прячем ошибку, как только человек снова начал печатать — не держим
+  // устаревшее сообщение поверх новой попытки.
+  document.querySelectorAll(".auth-panel input").forEach((input) => {
+    input.addEventListener("input", hideAuthError);
+  });
+
+  const loginPanel     = document.getElementById("loginPanel");
+  const loginLogin     = document.getElementById("loginLogin");
+  const loginPassword  = document.getElementById("loginPassword");
+
+  const registerPanel     = document.getElementById("registerPanel");
+  const regFirstName      = document.getElementById("regFirstName");
+  const regLastName       = document.getElementById("regLastName");
+  const regBirthDate      = document.getElementById("regBirthDate");
+  const regBirthDateHint  = document.getElementById("regBirthDateHint");
+  const regLogin           = document.getElementById("regLogin");
+  const regPassword        = document.getElementById("regPassword");
+  const regPassword2       = document.getElementById("regPassword2");
+  const regAgreeTerms      = document.getElementById("regAgreeTerms");
+  const regWebsite         = document.getElementById("regWebsite"); // honeypot, см. auth.html
+  const regPasswordMatchHint  = document.getElementById("regPasswordMatchHint");
+  const regLoginHint          = document.getElementById("regLoginHint");
+  const regPasswordLengthHint = document.getElementById("regPasswordLengthHint");
+
+  const openTermsBtn = document.getElementById("openTermsBtn");
+  if (openTermsBtn) {
+    openTermsBtn.addEventListener("click", openTermsModal);
+  }
+
+  function updatePasswordMatchHint() {
+    if (!regPasswordMatchHint) return;
+    if (!regPassword2.value) {
+      regPasswordMatchHint.textContent = "";
+      regPasswordMatchHint.className = "field-hint";
+      return;
+    }
+    const matches = regPassword.value === regPassword2.value;
+    regPasswordMatchHint.textContent = matches ? "Пароли совпадают" : "Пароли не совпадают";
+    regPasswordMatchHint.className = "field-hint " + (matches ? "ok" : "error");
+  }
+  if (regPassword2) {
+    regPassword.addEventListener("input", updatePasswordMatchHint);
+    regPassword2.addEventListener("input", updatePasswordMatchHint);
+  }
+
+  // Живая проверка формата логина и длины пароля прямо во время ввода —
+  // без похода на сервер (уникальность логина по-прежнему проверяется
+  // только на submit, самим /api/register — здесь это не нужно). Пустое
+  // поле показывает нейтральную подсказку-плейсхолдер, как и было раньше
+  // статичным текстом; как только человек начал печатать — цвет и текст
+  // отражают, проходит ли текущее значение будущую серверную проверку.
+  function updateRegLoginHint() {
+    if (!regLoginHint) return;
+    const value = regLogin.value.trim();
+    if (!value) {
+      regLoginHint.textContent = "Латиница, цифры, точка или подчёркивание — без пробелов";
+      regLoginHint.className = "field-hint";
+      return;
+    }
+    const ok = AUTH_LOGIN_FORMAT_RE.test(value);
+    regLoginHint.textContent = ok
+      ? "Логин подходит"
+      : "3–32 символа: латиница, цифры, точка или подчёркивание, без пробелов";
+    regLoginHint.className = "field-hint " + (ok ? "ok" : "error");
+  }
+  if (regLogin) regLogin.addEventListener("input", updateRegLoginHint);
+
+  function updateRegPasswordLengthHint() {
+    if (!regPasswordLengthHint) return;
+    const value = regPassword.value;
+    if (!value) {
+      regPasswordLengthHint.textContent = "Минимум 6 символов";
+      regPasswordLengthHint.className = "field-hint";
+      return;
+    }
+    const ok = value.length >= 6;
+    regPasswordLengthHint.textContent = ok
+      ? "Длина пароля подходит"
+      : `Ещё ${6 - value.length} симв. до минимума`;
+    regPasswordLengthHint.className = "field-hint " + (ok ? "ok" : "error");
+  }
+  if (regPassword) regPassword.addEventListener("input", updateRegPasswordLengthHint);
+
+  function updateRegBirthDateHint() {
+    if (!regBirthDateHint) return;
+    const value = regBirthDate.value;
+    if (!value) {
+      regBirthDateHint.textContent = "Нужно быть старше 13 лет";
+      regBirthDateHint.className = "field-hint";
+      return;
+    }
+    const inFuture = new Date(value).getTime() > Date.now();
+    const age = calculateAgeClient(value);
+    const ok = !inFuture && age >= AUTH_MIN_REGISTRATION_AGE && age <= 120;
+    regBirthDateHint.textContent = inFuture
+      ? "Дата рождения не может быть в будущем"
+      : ok
+        ? "Возраст подходит"
+        : age > 120
+          ? "Проверь дату рождения — похоже на опечатку"
+          : `LÖMO не для тех, кому меньше ${AUTH_MIN_REGISTRATION_AGE} лет`;
+    regBirthDateHint.className = "field-hint " + (ok ? "ok" : "error");
+  }
+  if (regBirthDate) regBirthDate.addEventListener("input", updateRegBirthDateHint);
+
+  function setSubmitLoading(button, loading, loadingLabel, normalLabel) {
+    button.disabled = loading;
+    button.textContent = loading ? loadingLabel : normalLabel;
+  }
+
+  if (loginPanel && loginLogin && loginPassword) {
+    const loginBtn = document.getElementById("loginBtn");
+    loginPanel.addEventListener("submit", async (e) => {
+      e.preventDefault();
       const login = loginLogin.value.trim();
       const pass  = loginPassword.value.trim();
       if (!login || !pass) {
-        alert("Заполни логин и пароль.");
+        showAuthError("Заполни логин и пароль.");
         return;
       }
+      setSubmitLoading(loginBtn, true, "Входим…", "Войти");
       try {
         const data = await apiRequest("/api/login", {
           method: "POST",
           body: { login, password: pass }
         });
         saveUser({ login: data.login, id: data.id, isAdmin: data.isAdmin, token: data.token });
-        alert(`Привет, ${data.login}!`);
         window.location.href = "index.html";
       } catch (err) {
         console.error(err);
-        alert("Ошибка входа: " + err.message);
+        showAuthError("Ошибка входа: " + err.message);
+        setSubmitLoading(loginBtn, false, "Входим…", "Войти");
       }
-    };
+    });
   }
 
-  if (regBtn && regLogin && regPassword && regPassword2) {
-    regBtn.onclick = async () => {
+  if (registerPanel && regLogin && regPassword && regPassword2) {
+    const regBtn = document.getElementById("regBtn");
+    registerPanel.addEventListener("submit", async (e) => {
+      e.preventDefault();
+      const firstName = regFirstName ? regFirstName.value.trim() : "";
+      const lastName  = regLastName ? regLastName.value.trim() : "";
+      const birthDate = regBirthDate ? regBirthDate.value : "";
       const login = regLogin.value.trim();
       const pass1 = regPassword.value.trim();
       const pass2 = regPassword2.value.trim();
 
-      if (!login || login.length < 3) {
-        alert("Логин минимум 3 символа.");
+      if (!AUTH_NAME_FORMAT_RE.test(firstName) || !AUTH_NAME_FORMAT_RE.test(lastName)) {
+        showAuthError("Укажи имя и фамилию (только буквы, дефис или апостроф).");
         return;
       }
-      if (!pass1 || pass1.length < 4) {
-        alert("Пароль минимум 4 символа.");
+      if (!birthDate || isNaN(new Date(birthDate).getTime())) {
+        showAuthError("Укажи корректную дату рождения.");
+        return;
+      }
+      if (new Date(birthDate).getTime() > Date.now()) {
+        showAuthError("Дата рождения не может быть в будущем.");
+        return;
+      }
+      {
+        const age = calculateAgeClient(birthDate);
+        if (age < AUTH_MIN_REGISTRATION_AGE) {
+          showAuthError(`LÖMO не для тех, кому меньше ${AUTH_MIN_REGISTRATION_AGE} лет.`);
+          return;
+        }
+        if (age > 120) {
+          showAuthError("Проверь дату рождения — похоже на опечатку.");
+          return;
+        }
+      }
+      if (!AUTH_LOGIN_FORMAT_RE.test(login)) {
+        showAuthError("Логин: 3–32 символа, только латиница, цифры, точка или подчёркивание, без пробелов.");
+        return;
+      }
+      if (!pass1 || pass1.length < 6) {
+        showAuthError("Пароль минимум 6 символов.");
         return;
       }
       if (pass1 !== pass2) {
-        alert("Пароли не совпадают.");
+        showAuthError("Пароли не совпадают.");
         return;
       }
+      if (regAgreeTerms && !regAgreeTerms.checked) {
+        showAuthError("Нужно принять пользовательское соглашение.");
+        return;
+      }
+      setSubmitLoading(regBtn, true, "Создаём…", "Создать аккаунт");
       try {
         const data = await apiRequest("/api/register", {
           method: "POST",
-          body: { login, password: pass1 }
+          body: { login, password: pass1, firstName, lastName, birthDate, agreedToTerms: true, website: regWebsite ? regWebsite.value : "" }
         });
         saveUser({ login: data.login, id: data.id, isAdmin: data.isAdmin, token: data.token });
-        alert(`Аккаунт "${data.login}" создан.\nТвой ID: ${data.id}`);
         window.location.href = "index.html";
       } catch (err) {
         console.error(err);
-        alert("Ошибка регистрации: " + err.message);
+        showAuthError("Ошибка регистрации: " + err.message);
+        setSubmitLoading(regBtn, false, "Создаём…", "Создать аккаунт");
       }
-    };
+    });
   }
 }
 
@@ -414,6 +671,8 @@ async function initAccountPage() {
   const profileName   = document.getElementById("profileName");
   const profileId     = document.getElementById("profileId");
   const profileAbout  = document.getElementById("profileAbout");
+  const profileBirthDateLabel = document.getElementById("profileBirthDateLabel");
+  const profileBirthDate      = document.getElementById("profileBirthDate");
   const profileAvatar = document.getElementById("profileAvatar");
   const avatarPh      = document.getElementById("avatarPlaceholder");
   const inputName     = document.getElementById("profileNameInput");
@@ -430,12 +689,13 @@ async function initAccountPage() {
   // не видны никому, кроме вас самих в этом браузере. Теперь это настоящие
   // серверные поля (см. PATCH /api/me) — login при этом НЕ меняется, это
   // фиксированный технический идентификатор (уникальность, вход, WS).
-  let profileData = { name: user.login, about: "", avatar: "" };
+  let profileData = { name: user.login, about: "", avatar: "", birthDate: "" };
   try {
     const server = await apiRequest("/api/me");
     profileData.name = server.displayName || user.login;
     profileData.avatar = server.avatarUrl || "";
     profileData.about = server.about || "";
+    profileData.birthDate = server.birthDate || "";
   } catch (e) {
     console.error("Не удалось загрузить профиль с сервера:", e);
   }
@@ -445,6 +705,14 @@ async function initAccountPage() {
     if (profileLoginEl) profileLoginEl.textContent = user.login;
     if (profileId)    profileId.textContent    = user.id || "нет ID";
     if (profileAbout) profileAbout.textContent = profileData.about || "Расскажи о себе :)";
+    // Дата рождения указывается один раз при регистрации (см. auth.html) —
+    // здесь только читаем, редактирования на "Мой аккаунт" для неё нет.
+    // Скрыта у аккаунтов, созданных до появления этого поля (пустая строка).
+    if (profileData.birthDate && profileBirthDate && profileBirthDateLabel) {
+      profileBirthDate.textContent = formatBirthDate(profileData.birthDate);
+      profileBirthDate.hidden = false;
+      profileBirthDateLabel.hidden = false;
+    }
 
     if (profileAvatar) {
       if (profileData.avatar) {
@@ -698,10 +966,12 @@ async function renderFeed(containerId) {
     const posts = await apiRequest("/api/feed");
     container.innerHTML = "";
     if (!posts.length) {
-      const empty = document.createElement("p");
-      empty.className = "muted";
-      empty.textContent = "Лента пуста. Добавьте друзей или вступите в группу, чтобы видеть публикации здесь.";
-      container.appendChild(empty);
+      renderEmptyState(container, {
+        iconName: "friends",
+        text: "Лента пуста. Добавьте друзей или вступите в группу, чтобы видеть публикации здесь.",
+        actionLabel: "Найти друзей",
+        actionHref: "friends.html"
+      });
       return;
     }
     posts.forEach((p) => container.appendChild(renderPostCard(p)));
@@ -887,6 +1157,7 @@ function initAdminPage() {
   renderAdminPosts();
   renderAdminGroups();
   renderAdminChatReports();
+  initAdminTermsEditor();
 
   const postSearchBtn = document.getElementById("adminPostSearchBtn");
   const postSearchInput = document.getElementById("adminPostSearch");
@@ -896,6 +1167,77 @@ function initAdminPage() {
       if (e.key === "Enter") { e.preventDefault(); renderAdminPosts(); }
     });
   }
+}
+
+// Редактор пользовательского соглашения — читает GET /api/terms (тот же
+// публичный роут, что и модалка на auth.html) и сохраняет правки по одному
+// языку через PATCH /api/admin/terms/:lang. Локально хранит все 4 языка в
+// `terms`, чтобы переключение вкладок не било лишний раз в сеть.
+async function initAdminTermsEditor() {
+  const tabs       = document.querySelectorAll("#termsEditorTabs .tab-btn");
+  const titleInput = document.getElementById("termsEditorTitle");
+  const bodyInput  = document.getElementById("termsEditorBody");
+  const saveBtn    = document.getElementById("termsEditorSaveBtn");
+  const statusEl   = document.getElementById("termsEditorStatus");
+  if (!tabs.length || !titleInput || !bodyInput || !saveBtn) return;
+
+  let currentLang = "ru";
+  let terms = {};
+
+  function showStatus(message, isError) {
+    if (!statusEl) return;
+    statusEl.textContent = message;
+    statusEl.className = "field-hint " + (isError ? "error" : "ok");
+    statusEl.hidden = false;
+  }
+
+  function renderLang(lang) {
+    const data = terms[lang];
+    titleInput.value = data ? data.title : "";
+    bodyInput.value  = data ? data.body : "";
+  }
+
+  try {
+    terms = await apiRequest("/api/terms");
+  } catch (err) {
+    showStatus("Не удалось загрузить соглашение: " + err.message, true);
+    return;
+  }
+  renderLang(currentLang);
+
+  tabs.forEach((btn) => {
+    btn.addEventListener("click", () => {
+      tabs.forEach((b) => b.classList.remove("active"));
+      btn.classList.add("active");
+      currentLang = btn.dataset.lang;
+      if (statusEl) statusEl.hidden = true;
+      renderLang(currentLang);
+    });
+  });
+
+  saveBtn.addEventListener("click", async () => {
+    const title = titleInput.value.trim();
+    const body  = bodyInput.value.trim();
+    if (!title || !body) {
+      showStatus("Заголовок и текст не должны быть пустыми.", true);
+      return;
+    }
+    saveBtn.disabled = true;
+    saveBtn.textContent = "Сохраняем…";
+    try {
+      const updated = await apiRequest(`/api/admin/terms/${currentLang}`, {
+        method: "PATCH",
+        body: { title, body }
+      });
+      terms[currentLang] = updated;
+      showStatus("Сохранено.", false);
+    } catch (err) {
+      showStatus("Ошибка сохранения: " + err.message, true);
+    } finally {
+      saveBtn.disabled = false;
+      saveBtn.textContent = "Сохранить";
+    }
+  });
 }
 
 async function renderAdminStats() {
@@ -1137,70 +1479,498 @@ async function renderAdminChatReports() {
 // MEDIA PAGES (music / video / books)
 // ========================
 
-function initMediaPage(type) {
+// ========================
+// МУЗЫКА (music.html) — реальные загруженные файлы + мини-плеер снизу
+// ========================
+
+function formatDuration(sec) {
+  if (!isFinite(sec) || sec < 0) return "0:00";
+  const m = Math.floor(sec / 60);
+  const s = Math.floor(sec % 60);
+  return `${m}:${String(s).padStart(2, "0")}`;
+}
+
+function initMusicPage() {
   const user = loadUser();
-  if (!user) {
-    window.location.href = "auth.html";
-    return;
-  }
+  if (!user) { window.location.href = "auth.html"; return; }
   initCommonNav();
   initThemeToggle();
 
-  const input = document.getElementById(`${type}Input`);
-  const btn   = document.getElementById(`${type}Add`);
-  const list  = document.getElementById(`${type}List`);
-  if (!input || !btn || !list) return;
+  const fileInput = document.getElementById("musicFileInput");
+  const addForm = document.getElementById("musicAddForm");
+  const titleInput = document.getElementById("musicTitleInput");
+  const artistInput = document.getElementById("musicArtistInput");
+  const confirmBtn = document.getElementById("musicConfirmAdd");
+  const cancelBtn = document.getElementById("musicCancelAdd");
+  const listEl = document.getElementById("musicList");
+  const playerBar = document.getElementById("musicPlayerBar");
+  const playerToggle = document.getElementById("musicPlayerToggle");
+  const playerTitle = document.getElementById("musicPlayerTitle");
+  const playerArtist = document.getElementById("musicPlayerArtist");
+  const audioEl = document.getElementById("musicAudioEl");
+  if (!listEl || !audioEl) return;
 
-  const STORAGE_KEY = `lomoMedia_${type}_${user.login}`;
+  let pendingFile = null;
+  let tracks = [];
+  let currentTrackId = null;
 
-  function loadMedia() {
+  fileInput.addEventListener("change", () => {
+    const file = fileInput.files && fileInput.files[0];
+    if (!file) return;
+    pendingFile = file;
+    titleInput.value = file.name.replace(/\.[^.]+$/, "");
+    artistInput.value = "";
+    addForm.hidden = false;
+    titleInput.focus();
+  });
+
+  cancelBtn.addEventListener("click", () => {
+    pendingFile = null;
+    fileInput.value = "";
+    addForm.hidden = true;
+  });
+
+  confirmBtn.addEventListener("click", async () => {
+    if (!pendingFile) return;
+    confirmBtn.disabled = true;
     try {
-      const raw = localStorage.getItem(STORAGE_KEY);
-      return raw ? JSON.parse(raw) : [];
-    } catch {
-      return [];
+      const form = new FormData();
+      form.append("file", pendingFile);
+      form.append("title", titleInput.value.trim());
+      form.append("artist", artistInput.value.trim());
+      await apiRequest("/api/tracks", { method: "POST", body: form });
+      pendingFile = null;
+      fileInput.value = "";
+      addForm.hidden = true;
+      loadTracks();
+    } catch (err) {
+      alert("Ошибка загрузки трека: " + err.message);
+    } finally {
+      confirmBtn.disabled = false;
     }
+  });
+
+  function renderPlayerBar() {
+    const track = tracks.find((t) => t.id === currentTrackId);
+    if (!track) { playerBar.hidden = true; return; }
+    playerBar.hidden = false;
+    playerTitle.textContent = track.title;
+    playerArtist.textContent = track.artist || "";
+    playerToggle.innerHTML = icon(audioEl.paused ? "play" : "pause", 18);
   }
 
-  function saveMedia(items) {
-    try {
-      localStorage.setItem(STORAGE_KEY, JSON.stringify(items));
-    } catch {}
+  function playTrack(track) {
+    if (currentTrackId === track.id) {
+      if (audioEl.paused) audioEl.play(); else audioEl.pause();
+      return;
+    }
+    currentTrackId = track.id;
+    audioEl.src = track.url;
+    audioEl.play().catch(() => {});
+    renderPlayerBar();
+    renderList();
   }
 
-  function render() {
-    const items = loadMedia();
-    list.innerHTML = "";
-    items.forEach((item, idx) => {
-      const li   = document.createElement("li");
-      const span = document.createElement("span");
-      span.textContent = item;
-      const del  = document.createElement("button");
-      del.className = "btn";
-      del.innerHTML = icon("trash", 14);
-      del.addEventListener("click", () => {
-        const arr = loadMedia();
-        arr.splice(idx, 1);
-        saveMedia(arr);
-        render();
+  playerToggle.addEventListener("click", () => {
+    if (audioEl.paused) audioEl.play(); else audioEl.pause();
+  });
+  audioEl.addEventListener("play", renderPlayerBar);
+  audioEl.addEventListener("pause", renderPlayerBar);
+  audioEl.addEventListener("ended", () => {
+    // По окончании — следующий трек в списке, как в обычном плеере.
+    const idx = tracks.findIndex((t) => t.id === currentTrackId);
+    const next = tracks[idx + 1];
+    if (next) playTrack(next);
+    else renderPlayerBar();
+  });
+
+  function renderList() {
+    listEl.innerHTML = "";
+    if (!tracks.length) {
+      renderEmptyState(listEl, { iconName: "music", text: "Пока нет треков — загрузи первый кнопкой выше." });
+      return;
+    }
+    tracks.forEach((track) => {
+      const row = document.createElement("div");
+      row.className = "track-row" + (track.id === currentTrackId ? " playing" : "");
+      const isPlaying = track.id === currentTrackId && !audioEl.paused;
+
+      const playBtn = document.createElement("button");
+      playBtn.type = "button";
+      playBtn.className = "track-play-btn";
+      playBtn.innerHTML = icon(isPlaying ? "pause" : "play", 16);
+      playBtn.addEventListener("click", () => playTrack(track));
+
+      const info = document.createElement("div");
+      info.className = "track-info";
+      const titleEl = document.createElement("div");
+      titleEl.className = "track-title";
+      titleEl.textContent = track.title;
+      const artistEl = document.createElement("div");
+      artistEl.className = "track-artist meta";
+      artistEl.textContent = track.artist || "";
+      info.appendChild(titleEl);
+      if (track.artist) info.appendChild(artistEl);
+
+      const delBtn = document.createElement("button");
+      delBtn.type = "button";
+      delBtn.className = "btn track-delete-btn";
+      delBtn.innerHTML = icon("trash", 14);
+      delBtn.addEventListener("click", async () => {
+        if (!confirm(`Удалить трек "${track.title}"?`)) return;
+        try {
+          await apiRequest(`/api/tracks/${encodeURIComponent(track.id)}`, { method: "DELETE" });
+          if (currentTrackId === track.id) { audioEl.pause(); audioEl.src = ""; currentTrackId = null; renderPlayerBar(); }
+          loadTracks();
+        } catch (err) { alert("Ошибка удаления: " + err.message); }
       });
-      li.appendChild(span);
-      li.appendChild(del);
-      list.appendChild(li);
+
+      row.appendChild(playBtn);
+      row.appendChild(info);
+      row.appendChild(delBtn);
+      listEl.appendChild(row);
     });
   }
 
-  btn.addEventListener("click", () => {
-    const val = input.value.trim();
-    if (!val) return;
-    const arr = loadMedia();
-    arr.push(val);
-    saveMedia(arr);
-    input.value = "";
-    render();
+  async function loadTracks() {
+    listEl.innerHTML = `<p class="muted">Загрузка...</p>`;
+    try {
+      tracks = await apiRequest("/api/tracks");
+      renderList();
+    } catch (err) {
+      listEl.textContent = "Ошибка загрузки: " + err.message;
+    }
+  }
+
+  loadTracks();
+}
+
+// ========================
+// ВИДЕО (video.html) — свой файл или ссылка (YouTube embed), плеер в модалке
+// ========================
+
+function initVideoPage() {
+  const user = loadUser();
+  if (!user) { window.location.href = "auth.html"; return; }
+  initCommonNav();
+  initThemeToggle();
+
+  const fileInput = document.getElementById("videoFileInput");
+  const uploadForm = document.getElementById("videoUploadForm");
+  const titleInput = document.getElementById("videoTitleInput");
+  const confirmUploadBtn = document.getElementById("videoConfirmUpload");
+  const cancelUploadBtn = document.getElementById("videoCancelUpload");
+
+  const addLinkBtn = document.getElementById("videoAddLinkBtn");
+  const linkForm = document.getElementById("videoLinkForm");
+  const linkInput = document.getElementById("videoLinkInput");
+  const linkTitleInput = document.getElementById("videoLinkTitleInput");
+  const confirmLinkBtn = document.getElementById("videoConfirmLink");
+  const cancelLinkBtn = document.getElementById("videoCancelLink");
+
+  const listEl = document.getElementById("videoList");
+  if (!listEl) return;
+
+  let pendingFile = null;
+
+  fileInput.addEventListener("change", () => {
+    const file = fileInput.files && fileInput.files[0];
+    if (!file) return;
+    pendingFile = file;
+    linkForm.hidden = true;
+    titleInput.value = file.name.replace(/\.[^.]+$/, "");
+    uploadForm.hidden = false;
+    titleInput.focus();
   });
 
-  render();
+  cancelUploadBtn.addEventListener("click", () => {
+    pendingFile = null;
+    fileInput.value = "";
+    uploadForm.hidden = true;
+  });
+
+  confirmUploadBtn.addEventListener("click", async () => {
+    if (!pendingFile) return;
+    confirmUploadBtn.disabled = true;
+    try {
+      const form = new FormData();
+      form.append("file", pendingFile);
+      form.append("title", titleInput.value.trim());
+      await apiRequest("/api/videos/upload", { method: "POST", body: form });
+      pendingFile = null;
+      fileInput.value = "";
+      uploadForm.hidden = true;
+      loadVideos();
+    } catch (err) {
+      alert("Ошибка загрузки видео: " + err.message);
+    } finally {
+      confirmUploadBtn.disabled = false;
+    }
+  });
+
+  addLinkBtn.addEventListener("click", () => {
+    uploadForm.hidden = true;
+    linkForm.hidden = !linkForm.hidden;
+    if (!linkForm.hidden) linkInput.focus();
+  });
+
+  cancelLinkBtn.addEventListener("click", () => {
+    linkForm.hidden = true;
+    linkInput.value = "";
+    linkTitleInput.value = "";
+  });
+
+  confirmLinkBtn.addEventListener("click", async () => {
+    const externalUrl = linkInput.value.trim();
+    if (!externalUrl) return;
+    confirmLinkBtn.disabled = true;
+    try {
+      await apiRequest("/api/videos/link", { method: "POST", body: { externalUrl, title: linkTitleInput.value.trim() } });
+      linkForm.hidden = true;
+      linkInput.value = "";
+      linkTitleInput.value = "";
+      loadVideos();
+    } catch (err) {
+      alert("Ошибка добавления ссылки: " + err.message);
+    } finally {
+      confirmLinkBtn.disabled = false;
+    }
+  });
+
+  function openVideoPlayer(video) {
+    const overlay = document.createElement("div");
+    overlay.className = "story-viewer-overlay";
+    const playerHtml = video.kind === "upload"
+      ? `<video class="video-player" src="${video.url}" controls autoplay></video>`
+      : (video.youtubeId
+          ? `<iframe class="video-player" src="https://www.youtube.com/embed/${video.youtubeId}?autoplay=1" frameborder="0" allow="autoplay; encrypted-media" allowfullscreen></iframe>`
+          : "");
+    overlay.innerHTML = `
+      <div class="video-player-wrap">
+        <button type="button" class="contact-card-close">${icon("close", 18)}</button>
+        ${playerHtml}
+      </div>
+    `;
+    if (!playerHtml) {
+      // Не YouTube и не свой файл — плеера нет, просто открываем ссылку.
+      window.open(video.externalUrl, "_blank", "noopener");
+      return;
+    }
+    const close = () => overlay.remove();
+    overlay.querySelector(".contact-card-close").addEventListener("click", close);
+    overlay.addEventListener("click", (e) => { if (e.target === overlay) close(); });
+    document.body.appendChild(overlay);
+  }
+
+  function renderList(videos) {
+    listEl.innerHTML = "";
+    if (!videos.length) {
+      renderEmptyState(listEl, { iconName: "video", text: "Пока нет видео — загрузи файл или добавь ссылку." });
+      return;
+    }
+    videos.forEach((video) => {
+      const card = document.createElement("div");
+      card.className = "video-card";
+
+      const thumb = document.createElement("div");
+      thumb.className = "video-card-thumb";
+      thumb.innerHTML = icon(video.kind === "link" ? "link" : "video", 28);
+      thumb.addEventListener("click", () => openVideoPlayer(video));
+
+      const title = document.createElement("div");
+      title.className = "video-card-title";
+      title.textContent = video.title;
+
+      const delBtn = document.createElement("button");
+      delBtn.type = "button";
+      delBtn.className = "btn video-card-delete";
+      delBtn.innerHTML = icon("trash", 14);
+      delBtn.addEventListener("click", async (e) => {
+        e.stopPropagation();
+        if (!confirm(`Удалить видео "${video.title}"?`)) return;
+        try {
+          await apiRequest(`/api/videos/${encodeURIComponent(video.id)}`, { method: "DELETE" });
+          loadVideos();
+        } catch (err) { alert("Ошибка удаления: " + err.message); }
+      });
+
+      card.appendChild(thumb);
+      card.appendChild(title);
+      card.appendChild(delBtn);
+      listEl.appendChild(card);
+    });
+  }
+
+  async function loadVideos() {
+    listEl.innerHTML = `<p class="muted">Загрузка...</p>`;
+    try {
+      renderList(await apiRequest("/api/videos"));
+    } catch (err) {
+      listEl.textContent = "Ошибка загрузки: " + err.message;
+    }
+  }
+
+  loadVideos();
+}
+
+// ========================
+// КНИГИ (books.html) — личная библиотека, вкладки по статусу
+// ========================
+
+const BOOK_STATUS_LABELS = { want: "Хочу прочитать", reading: "Читаю", done: "Прочитано" };
+
+function initBooksPage() {
+  const user = loadUser();
+  if (!user) { window.location.href = "auth.html"; return; }
+  initCommonNav();
+  initThemeToggle();
+
+  const addBtn = document.getElementById("bookAddBtn");
+  const addForm = document.getElementById("bookAddForm");
+  const titleInput = document.getElementById("bookTitleInput");
+  const authorInput = document.getElementById("bookAuthorInput");
+  const coverInput = document.getElementById("bookCoverInput");
+  const linkInput = document.getElementById("bookLinkInput");
+  const confirmBtn = document.getElementById("bookConfirmAdd");
+  const cancelBtn = document.getElementById("bookCancelAdd");
+  const tabsEl = document.getElementById("booksTabs");
+  const listEl = document.getElementById("bookList");
+  if (!listEl) return;
+
+  let books = [];
+  let activeStatus = "want";
+
+  addBtn.addEventListener("click", () => {
+    addForm.hidden = !addForm.hidden;
+    if (!addForm.hidden) titleInput.focus();
+  });
+
+  cancelBtn.addEventListener("click", () => {
+    addForm.hidden = true;
+    titleInput.value = ""; authorInput.value = ""; coverInput.value = ""; linkInput.value = "";
+  });
+
+  confirmBtn.addEventListener("click", async () => {
+    const title = titleInput.value.trim();
+    if (!title) { alert("Укажите название"); return; }
+    confirmBtn.disabled = true;
+    try {
+      await apiRequest("/api/books", {
+        method: "POST",
+        body: { title, author: authorInput.value.trim(), coverUrl: coverInput.value.trim(), link: linkInput.value.trim(), status: activeStatus }
+      });
+      addForm.hidden = true;
+      titleInput.value = ""; authorInput.value = ""; coverInput.value = ""; linkInput.value = "";
+      loadBooks();
+    } catch (err) {
+      alert("Ошибка добавления книги: " + err.message);
+    } finally {
+      confirmBtn.disabled = false;
+    }
+  });
+
+  tabsEl.querySelectorAll(".tab-btn").forEach((btn) => {
+    btn.addEventListener("click", () => {
+      tabsEl.querySelectorAll(".tab-btn").forEach((b) => b.classList.remove("active"));
+      btn.classList.add("active");
+      activeStatus = btn.dataset.status;
+      renderList();
+    });
+  });
+
+  async function setStatus(book, status) {
+    try {
+      await apiRequest(`/api/books/${encodeURIComponent(book.id)}`, { method: "PATCH", body: { status } });
+      loadBooks();
+    } catch (err) { alert("Ошибка: " + err.message); }
+  }
+
+  function renderList() {
+    listEl.innerHTML = "";
+    const filtered = books.filter((b) => b.status === activeStatus);
+    if (!filtered.length) {
+      renderEmptyState(listEl, { iconName: "books", text: `Пока пусто в разделе "${BOOK_STATUS_LABELS[activeStatus]}".` });
+      return;
+    }
+    filtered.forEach((book) => {
+      const card = document.createElement("div");
+      card.className = "book-card";
+
+      const cover = document.createElement("div");
+      cover.className = "book-card-cover";
+      if (book.coverUrl) {
+        cover.style.backgroundImage = `url("${book.coverUrl}")`;
+      } else {
+        cover.innerHTML = icon("books", 24);
+      }
+
+      const info = document.createElement("div");
+      info.className = "book-card-info";
+      const titleEl = document.createElement("div");
+      titleEl.className = "book-card-title";
+      titleEl.textContent = book.title;
+      info.appendChild(titleEl);
+      if (book.author) {
+        const authorEl = document.createElement("div");
+        authorEl.className = "meta";
+        authorEl.textContent = book.author;
+        info.appendChild(authorEl);
+      }
+
+      const actions = document.createElement("div");
+      actions.className = "book-card-actions";
+      const select = document.createElement("select");
+      Object.entries(BOOK_STATUS_LABELS).forEach(([value, label]) => {
+        const opt = document.createElement("option");
+        opt.value = value;
+        opt.textContent = label;
+        if (value === book.status) opt.selected = true;
+        select.appendChild(opt);
+      });
+      select.addEventListener("change", () => setStatus(book, select.value));
+      actions.appendChild(select);
+      enhanceSelect(select);
+
+      if (book.link) {
+        const readLink = document.createElement("a");
+        readLink.className = "btn";
+        readLink.href = book.link;
+        readLink.target = "_blank";
+        readLink.rel = "noopener";
+        readLink.textContent = "Читать";
+        actions.appendChild(readLink);
+      }
+
+      const delBtn = document.createElement("button");
+      delBtn.type = "button";
+      delBtn.className = "btn";
+      delBtn.innerHTML = icon("trash", 14);
+      delBtn.addEventListener("click", async () => {
+        if (!confirm(`Удалить "${book.title}" из библиотеки?`)) return;
+        try {
+          await apiRequest(`/api/books/${encodeURIComponent(book.id)}`, { method: "DELETE" });
+          loadBooks();
+        } catch (err) { alert("Ошибка удаления: " + err.message); }
+      });
+      actions.appendChild(delBtn);
+
+      card.appendChild(cover);
+      card.appendChild(info);
+      card.appendChild(actions);
+      listEl.appendChild(card);
+    });
+  }
+
+  async function loadBooks() {
+    try {
+      books = await apiRequest("/api/books");
+      renderList();
+    } catch (err) {
+      listEl.textContent = "Ошибка загрузки: " + err.message;
+    }
+  }
+
+  loadBooks();
 }
 
 // ========================
@@ -2718,7 +3488,10 @@ function connectWebSocket() {
     wsReconnectTimer = null;
   }
 
-  const url = `${WS_URL}?login=${encodeURIComponent(user.login)}&room=${encodeURIComponent(currentRoom)}`;
+  // token, не login — сервер сам достаёт login из подписанного JWT
+  // (см. wss.on("connection") в server.js), не доверяя тому, что клиент
+  // о себе заявляет в query-строке.
+  const url = `${WS_URL}?token=${encodeURIComponent(user.token)}&room=${encodeURIComponent(currentRoom)}`;
   ws = new WebSocket(url);
 
   ws.addEventListener("open", () => {
@@ -3703,10 +4476,7 @@ function initWall(containerId, ownerType, ownerId, canPost) {
       const posts = await apiRequest(`/api/posts?ownerType=${encodeURIComponent(ownerType)}&ownerId=${encodeURIComponent(ownerId)}`);
       postsEl.innerHTML = "";
       if (!posts.length) {
-        const empty = document.createElement("p");
-        empty.className = "muted";
-        empty.textContent = "На стене пока пусто.";
-        postsEl.appendChild(empty);
+        renderEmptyState(postsEl, { iconName: "news", text: "На стене пока пусто." });
         return;
       }
       posts.forEach(p => postsEl.appendChild(renderPostCard(p)));
@@ -3773,6 +4543,157 @@ function initWall(containerId, ownerType, ownerId, canPost) {
   loadWallPosts();
 }
 
+// Единое "тут пока пусто" — иконка + текст + (опционально) кнопка-CTA,
+// вместо голой строки текста в никуда (см. .empty-state в styles.css).
+// actionHref делает кнопку обычной ссылкой <a>; actionOnClick — <button>
+// с обработчиком — указывай ровно один из двух, если нужна кнопка вообще.
+function renderEmptyState(container, { iconName, text, actionLabel, actionHref, actionOnClick }) {
+  if (!container) return;
+  container.innerHTML = "";
+  const wrap = document.createElement("div");
+  wrap.className = "empty-state";
+
+  const iconWrap = document.createElement("div");
+  iconWrap.className = "empty-state-icon";
+  iconWrap.innerHTML = icon(iconName || "friends", 26);
+  wrap.appendChild(iconWrap);
+
+  const p = document.createElement("p");
+  p.textContent = text;
+  wrap.appendChild(p);
+
+  if (actionLabel && (actionHref || actionOnClick)) {
+    const btn = actionHref ? document.createElement("a") : document.createElement("button");
+    btn.className = "btn primary";
+    btn.textContent = actionLabel;
+    if (actionHref) {
+      btn.href = actionHref;
+    } else {
+      btn.type = "button";
+      btn.addEventListener("click", actionOnClick);
+    }
+    wrap.appendChild(btn);
+  }
+
+  container.appendChild(wrap);
+}
+
+// Кастомная выпадашка поверх обычного <select> — сам попап нативного
+// select рисует ОС/браузер, CSS до него не достаёт (только фон/цвет
+// option, ничего больше — уже сделано отдельно). Тут — полноценная
+// подмена: настоящий <select> остаётся в DOM и продолжает быть
+// источником истины (.value, событие "change" — весь существующий код
+// сортировки/фильтров/статуса книги, написанный ДО этой функции,
+// работает без единой правки), просто визуально спрятан и не кликабелен
+// — вместо него кнопка-триггер + свой div-список поверх, стилизованные
+// так же, как остальные дропдауны в проекте (ср. .group-modal-more-menu).
+// Идемпотентна (dataset.enhanced) — безопасно звать даже если элемент
+// уже обёрнут.
+function enhanceSelect(selectEl) {
+  if (!selectEl || selectEl.dataset.enhanced) return;
+  selectEl.dataset.enhanced = "1";
+
+  const wrap = document.createElement("div");
+  wrap.className = "custom-select";
+  selectEl.parentNode.insertBefore(wrap, selectEl);
+  wrap.appendChild(selectEl);
+  selectEl.classList.add("custom-select-native");
+  selectEl.tabIndex = -1;
+
+  const trigger = document.createElement("button");
+  trigger.type = "button";
+  trigger.className = "custom-select-trigger";
+  wrap.appendChild(trigger);
+
+  // В document.body, а НЕ внутрь wrap: position:fixed позиционируется от
+  // viewport только пока ни один предок не задаёт transform/filter/
+  // backdrop-filter/perspective — а в проекте это сплошь и рядом
+  // (hover translateY(-2px) на .group-card/.book-card/.post-card и т.п.).
+  // Такой предок сам становится containing block для fixed-потомка, и
+  // меню улетает в угол ЕГО бокса вместо угла триггера (поймано вживую:
+  // навёл мышь на карточку книги, открыл select статуса — список уехал
+  // на середину экрана). body трансформов не имеет никогда.
+  const menu = document.createElement("div");
+  menu.className = "custom-select-menu";
+  menu.hidden = true;
+  document.body.appendChild(menu);
+
+  function renderOptions() {
+    menu.innerHTML = "";
+    Array.from(selectEl.options).forEach((opt, i) => {
+      const item = document.createElement("button");
+      item.type = "button";
+      item.className = "custom-select-option" + (i === selectEl.selectedIndex ? " active" : "");
+      item.textContent = opt.textContent;
+      item.addEventListener("click", () => {
+        if (selectEl.selectedIndex !== i) {
+          selectEl.selectedIndex = i;
+          selectEl.dispatchEvent(new Event("change", { bubbles: true }));
+        }
+        closeMenu();
+      });
+      menu.appendChild(item);
+    });
+  }
+
+  function updateTrigger() {
+    const opt = selectEl.options[selectEl.selectedIndex];
+    trigger.textContent = opt ? opt.textContent : "";
+  }
+
+  // position:fixed + координаты из getBoundingClientRect(), а не обычный
+  // position:absolute относительно .custom-select — иначе меню обрезалось
+  // бы по границе первого же скроллящегося/overflow:hidden предка
+  // (например .create-group-modal с его overflow-y:auto — поймано именно
+  // на нём: список категорий обрезался на второй строке).
+  function positionMenu() {
+    const rect = trigger.getBoundingClientRect();
+    menu.style.top = `${rect.bottom + 4}px`;
+    menu.style.left = `${rect.left}px`;
+    menu.style.minWidth = `${rect.width}px`;
+  }
+
+  function closeMenu() {
+    menu.hidden = true;
+    wrap.classList.remove("open");
+    window.removeEventListener("scroll", closeMenu, true);
+    window.removeEventListener("resize", closeMenu);
+  }
+  function openMenu() {
+    renderOptions();
+    menu.hidden = false;
+    wrap.classList.add("open");
+    positionMenu();
+    // capture:true — скролл внутри модалки/списка не всплывает обычным
+    // способом, а нам нужно закрыть меню при любом скролле любого предка,
+    // не только document, иначе оно "отклеится" от триггера.
+    window.addEventListener("scroll", closeMenu, true);
+    window.addEventListener("resize", closeMenu);
+  }
+
+  trigger.addEventListener("click", (e) => {
+    e.stopPropagation();
+    if (menu.hidden) openMenu(); else closeMenu();
+  });
+
+  // Один слушатель на документ на каждый инстанс — самоочищается, как
+  // только обёртку выкидывают из DOM (типичный случай: карточка книги
+  // целиком пересоздаётся при каждом renderList()), чтобы не копить
+  // мёртвые обработчики на удалённых элементах при частых перерисовках.
+  document.addEventListener("click", function onDocClick(e) {
+    if (!document.contains(wrap)) {
+      document.removeEventListener("click", onDocClick);
+      menu.remove();
+      return;
+    }
+    // menu теперь не внутри wrap (см. выше, почему) — проверяем оба.
+    if (!wrap.contains(e.target) && !menu.contains(e.target)) closeMenu();
+  });
+
+  selectEl.addEventListener("change", updateTrigger);
+  updateTrigger();
+}
+
 // ========================
 // ДРУЗЬЯ (friends.html) / ПРОФИЛЬ (profile.html)
 // ========================
@@ -3836,6 +4757,8 @@ async function initProfilePage() {
   const idEl = document.getElementById("profileViewId");
   const aboutLabelEl = document.getElementById("profileViewAboutLabel");
   const aboutEl = document.getElementById("profileViewAbout");
+  const birthDateLabelEl = document.getElementById("profileViewBirthDateLabel");
+  const birthDateEl = document.getElementById("profileViewBirthDate");
   const friendBtnWrap = document.getElementById("profileFriendAction");
 
   if (!targetId) {
@@ -3859,6 +4782,11 @@ async function initProfilePage() {
     aboutEl.textContent = target.about;
     aboutEl.hidden = false;
     aboutLabelEl.hidden = false;
+  }
+  if (target.birthDate && birthDateEl && birthDateLabelEl) {
+    birthDateEl.textContent = formatBirthDate(target.birthDate);
+    birthDateEl.hidden = false;
+    birthDateLabelEl.hidden = false;
   }
   if (avatarEl) {
     if (target.avatarUrl) {
@@ -3962,7 +4890,7 @@ async function initFriendsPage() {
     try {
       const friends = await apiRequest("/api/friends");
       if (!friends.length) {
-        friendsListEl.innerHTML = `<p class="muted">Пока нет друзей.</p>`;
+        renderEmptyState(friendsListEl, { iconName: "friends", text: "Пока нет друзей — найдите кого-нибудь поиском выше." });
       } else {
         friends.forEach(f => friendsListEl.appendChild(renderPersonRow(f, {
           actionLabel: "Удалить",
@@ -4065,20 +4993,149 @@ async function initFriendsPage() {
 // ГРУППЫ (groups.html / group.html)
 // ========================
 
+// Ключи должны совпадать с value чипов/<option> в groups.html и с
+// GROUP_CATEGORY_KEYS в server.js (единственное место, где они реально
+// валидируются — это просто подписи для уже готовых ключей).
+const GROUP_CATEGORY_LABELS = {
+  it: "IT и разработка",
+  fun: "Развлечения",
+  games: "Игры",
+  education: "Образование",
+  music: "Музыка",
+  movies: "Кино",
+  other: "Разное",
+};
+
 function renderGroupCard(group) {
   const card = document.createElement("div");
   card.className = "group-card";
   card.innerHTML = `
-    <a class="group-name"></a>
+    <div class="group-card-header">
+      <div class="group-avatar"></div>
+      <a class="group-name"></a>
+    </div>
     <p class="group-description"></p>
-    <p class="muted group-members-count"></p>
+    <div class="group-card-footer">
+      <span class="chip group-category-badge"></span>
+      <span class="muted group-members-count"></span>
+    </div>
   `;
   const link = card.querySelector(".group-name");
   link.href = `group.html?id=${encodeURIComponent(group.id)}`;
   link.textContent = group.name;
   card.querySelector(".group-description").textContent = group.description || "";
   card.querySelector(".group-members-count").textContent = `Участников: ${group.membersCount}`;
+  card.querySelector(".group-category-badge").textContent = GROUP_CATEGORY_LABELS[group.category] || GROUP_CATEGORY_LABELS.other;
+  const avatarEl = card.querySelector(".group-avatar");
+  if (group.avatarUrl) {
+    avatarEl.style.backgroundImage = `url("${group.avatarUrl}")`;
+  } else {
+    avatarEl.textContent = (group.name || "?")[0].toUpperCase();
+  }
   return card;
+}
+
+// Модалка создания группы (по образцу создания канала в Telegram — см.
+// дизайн-ревью в CLAUDE.md): аватар необязателен (ссылка, файлов группы
+// не грузят, как и раньше), название обязательно и первым делом блокирует
+// кнопку "Создать", категория — фиксированный список вместо свободных
+// тегов. onCreated(group) вызывается после успешного создания.
+function openCreateGroupModal(onCreated) {
+  const overlay = document.createElement("div");
+  overlay.className = "story-viewer-overlay";
+  overlay.innerHTML = `
+    <div class="create-group-modal">
+      <button type="button" class="contact-card-close" aria-label="Закрыть">
+        <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 6l12 12M18 6 6 18"/></svg>
+      </button>
+      <h2>Создать группу</h2>
+      <div class="avatar-edit-row">
+        <div id="newGroupAvatarPreview" class="avatar-edit-preview">+</div>
+        <div class="avatar-edit-actions">
+          <button type="button" id="newGroupAvatarToggle" class="btn">Ссылка на фото</button>
+          <input id="newGroupAvatarUrl" placeholder="https://..." hidden>
+        </div>
+      </div>
+      <label>
+        <div class="meta">Название</div>
+        <input id="newGroupName" placeholder="Название группы" maxlength="80">
+      </label>
+      <label>
+        <div class="meta">Описание</div>
+        <textarea id="newGroupDesc" rows="3" placeholder="Описание (необязательно)"></textarea>
+      </label>
+      <label>
+        <div class="meta">Категория</div>
+        <select id="newGroupCategory">
+          ${Object.entries(GROUP_CATEGORY_LABELS).map(([key, label]) =>
+            `<option value="${key}"${key === "other" ? " selected" : ""}>${label}</option>`
+          ).join("")}
+        </select>
+      </label>
+      <div class="create-group-actions">
+        <button type="button" class="btn" id="newGroupCancelBtn">Отмена</button>
+        <button type="button" class="btn primary" id="newGroupSubmitBtn" disabled>Создать</button>
+      </div>
+    </div>
+  `;
+  document.body.appendChild(overlay);
+
+  const close = () => overlay.remove();
+  overlay.querySelector(".contact-card-close").addEventListener("click", close);
+  overlay.querySelector("#newGroupCancelBtn").addEventListener("click", close);
+  overlay.addEventListener("click", (e) => { if (e.target === overlay) close(); });
+  document.addEventListener("keydown", function onKey(e) {
+    if (e.key === "Escape") { close(); document.removeEventListener("keydown", onKey); }
+  });
+
+  const nameInput = overlay.querySelector("#newGroupName");
+  const submitBtn = overlay.querySelector("#newGroupSubmitBtn");
+  nameInput.addEventListener("input", () => {
+    submitBtn.disabled = !nameInput.value.trim();
+  });
+  enhanceSelect(overlay.querySelector("#newGroupCategory"));
+
+  const avatarPreview = overlay.querySelector("#newGroupAvatarPreview");
+  const avatarToggle = overlay.querySelector("#newGroupAvatarToggle");
+  const avatarUrlInput = overlay.querySelector("#newGroupAvatarUrl");
+  avatarToggle.addEventListener("click", () => {
+    avatarUrlInput.hidden = !avatarUrlInput.hidden;
+    if (!avatarUrlInput.hidden) avatarUrlInput.focus();
+  });
+  avatarUrlInput.addEventListener("input", () => {
+    const url = avatarUrlInput.value.trim();
+    if (url) {
+      avatarPreview.style.backgroundImage = `url("${url}")`;
+      avatarPreview.textContent = "";
+    } else {
+      avatarPreview.style.backgroundImage = "";
+      avatarPreview.textContent = "+";
+    }
+  });
+
+  submitBtn.addEventListener("click", async () => {
+    const name = nameInput.value.trim();
+    if (!name) return;
+    submitBtn.disabled = true;
+    submitBtn.textContent = "Создаём…";
+    try {
+      const group = await apiRequest("/api/groups", {
+        method: "POST",
+        body: {
+          name,
+          description: overlay.querySelector("#newGroupDesc").value.trim(),
+          avatarUrl: avatarUrlInput.value.trim(),
+          category: overlay.querySelector("#newGroupCategory").value,
+        }
+      });
+      close();
+      onCreated(group);
+    } catch (err) {
+      alert("Ошибка создания группы: " + err.message);
+      submitBtn.disabled = false;
+      submitBtn.textContent = "Создать";
+    }
+  });
 }
 
 async function initGroupsPage() {
@@ -4086,17 +5143,39 @@ async function initGroupsPage() {
   initThemeToggle();
 
   const listEl = document.getElementById("groupsList");
-  const nameInput = document.getElementById("groupNameInput");
-  const descInput = document.getElementById("groupDescInput");
   const createBtn = document.getElementById("groupCreateBtn");
+  const searchInput = document.getElementById("groupSearchInput");
+  const searchBtn = document.getElementById("groupSearchBtn");
+  const scopeTabs = document.querySelectorAll("#groupsScopeTabs .tab-btn");
+  const categoryChips = document.querySelectorAll("#groupCategoryChips .chip");
+  const sortSelect = document.getElementById("groupSortSelect");
+  enhanceSelect(sortSelect);
+
+  // Состояние фильтров живёт в замыкании (не в URL) — страница
+  // однократного захода, глубокие ссылки на "мои группы + категория IT"
+  // не требовались.
+  const state = { scope: "all", category: "all", sort: "popular" };
 
   async function renderGroups() {
     if (!listEl) return;
-    listEl.innerHTML = "";
+    listEl.innerHTML = `<p class="muted">Загрузка...</p>`;
     try {
-      const groups = await apiRequest("/api/groups");
+      const params = new URLSearchParams();
+      const q = searchInput ? searchInput.value.trim() : "";
+      if (q) params.set("q", q);
+      if (state.category !== "all") params.set("category", state.category);
+      if (state.scope === "mine") params.set("mine", "1");
+      params.set("sort", state.sort);
+
+      const groups = await apiRequest(`/api/groups?${params.toString()}`);
+      listEl.innerHTML = "";
       if (!groups.length) {
-        listEl.innerHTML = `<p class="muted">Пока нет ни одной группы. Создайте первую!</p>`;
+        renderEmptyState(listEl, {
+          iconName: "groups",
+          text: state.scope === "mine"
+            ? "Ты пока не состоишь ни в одной группе."
+            : "Ничего не нашлось — попробуй другой запрос или фильтр."
+        });
       } else {
         groups.forEach(g => listEl.appendChild(renderGroupCard(g)));
       }
@@ -4104,15 +5183,42 @@ async function initGroupsPage() {
   }
 
   if (createBtn) {
-    createBtn.addEventListener("click", async () => {
-      const name = nameInput.value.trim();
-      if (!name) { alert("Укажи название группы"); return; }
-      try {
-        await apiRequest("/api/groups", { method: "POST", body: { name, description: descInput.value.trim() } });
-        nameInput.value = "";
-        descInput.value = "";
-        renderGroups();
-      } catch (err) { alert("Ошибка: " + err.message); }
+    createBtn.addEventListener("click", () => {
+      openCreateGroupModal((group) => {
+        window.location.href = `group.html?id=${encodeURIComponent(group.id)}`;
+      });
+    });
+  }
+
+  if (searchBtn) searchBtn.addEventListener("click", renderGroups);
+  if (searchInput) {
+    searchInput.addEventListener("keydown", (e) => {
+      if (e.key === "Enter") { e.preventDefault(); renderGroups(); }
+    });
+  }
+
+  scopeTabs.forEach((btn) => {
+    btn.addEventListener("click", () => {
+      scopeTabs.forEach((b) => b.classList.remove("active"));
+      btn.classList.add("active");
+      state.scope = btn.dataset.scope;
+      renderGroups();
+    });
+  });
+
+  categoryChips.forEach((chip) => {
+    chip.addEventListener("click", () => {
+      categoryChips.forEach((c) => c.classList.remove("active"));
+      chip.classList.add("active");
+      state.category = chip.dataset.category;
+      renderGroups();
+    });
+  });
+
+  if (sortSelect) {
+    sortSelect.addEventListener("change", () => {
+      state.sort = sortSelect.value;
+      renderGroups();
     });
   }
 
@@ -4128,6 +5234,8 @@ async function initGroupPage() {
   const nameEl = document.getElementById("groupViewName");
   const descEl = document.getElementById("groupViewDescription");
   const membersEl = document.getElementById("groupViewMembers");
+  const categoryEl = document.getElementById("groupViewCategory");
+  const avatarEl = document.getElementById("groupViewAvatar");
   const actionsEl = document.getElementById("groupActions");
 
   if (!groupId) {
@@ -4147,6 +5255,16 @@ async function initGroupPage() {
     if (nameEl) nameEl.textContent = group.name;
     if (descEl) descEl.textContent = group.description || "";
     if (membersEl) membersEl.textContent = `Участников: ${group.membersCount}`;
+    if (categoryEl) categoryEl.textContent = GROUP_CATEGORY_LABELS[group.category] || GROUP_CATEGORY_LABELS.other;
+    if (avatarEl) {
+      if (group.avatarUrl) {
+        avatarEl.style.backgroundImage = `url("${group.avatarUrl}")`;
+        avatarEl.textContent = "";
+      } else {
+        avatarEl.style.backgroundImage = "";
+        avatarEl.textContent = (group.name || "?")[0].toUpperCase();
+      }
+    }
 
     if (actionsEl) {
       actionsEl.innerHTML = "";
@@ -4210,20 +5328,32 @@ async function initPhotosPage() {
   const albumsListEl = document.getElementById("albumsList");
   const titleInput = document.getElementById("albumTitleInput");
   const createBtn = document.getElementById("albumCreateBtn");
+  const sectionEl = document.getElementById("albumPhotosSection");
   const currentAlbumEl = document.getElementById("currentAlbumTitle");
   const photoGridEl = document.getElementById("photoGrid");
   const fileInput = document.getElementById("photoFileInput");
-  const uploadBtn = document.getElementById("photoUploadBtn");
+  const noAlbumsHintEl = document.getElementById("noAlbumsHint");
 
   let currentAlbumId = null;
 
+  // Раньше секция загрузки была видна ВСЕГДА, даже когда альбомов ещё
+  // нет вообще — заголовок показывал placeholder "—", а кнопка "Загрузить
+  // фото" выглядела рабочей, но по клику просто ругалась "сначала выбери
+  // альбом". Путало (баг найден при дизайн-ревью). Теперь секция скрыта,
+  // пока нет выбранного альбома — вместо неё честная подсказка.
   async function loadPhotos(albumId, title) {
     currentAlbumId = albumId;
+    if (noAlbumsHintEl) noAlbumsHintEl.innerHTML = "";
+    if (sectionEl) sectionEl.hidden = false;
     if (currentAlbumEl) currentAlbumEl.textContent = title;
     if (!photoGridEl) return;
     photoGridEl.innerHTML = "";
     try {
       const photos = await apiRequest(`/api/albums/${encodeURIComponent(albumId)}/photos`);
+      if (!photos.length) {
+        renderEmptyState(photoGridEl, { iconName: "photos", text: "В этом альбоме пока нет фото — загрузите первое кнопкой выше." });
+        return;
+      }
       photos.forEach(p => photoGridEl.appendChild(renderPhotoItem(p, async (item) => {
         if (!confirm("Удалить фото?")) return;
         try {
@@ -4240,7 +5370,8 @@ async function initPhotosPage() {
     try {
       const albums = await apiRequest(`/api/albums/${encodeURIComponent(me.id)}`);
       if (!albums.length) {
-        albumsListEl.innerHTML = `<p class="muted">Пока нет альбомов.</p>`;
+        if (sectionEl) sectionEl.hidden = true;
+        if (noAlbumsHintEl) renderEmptyState(noAlbumsHintEl, { iconName: "photos", text: "Пока нет альбомов — создайте первый формой выше, чтобы начать загружать фото." });
         return;
       }
       albums.forEach(a => {
@@ -4266,18 +5397,22 @@ async function initPhotosPage() {
     });
   }
 
-  if (uploadBtn && fileInput) {
-    uploadBtn.addEventListener("click", async () => {
+  // Файл грузится сразу по выбору (без отдельной кнопки "загрузить") —
+  // альбом на этот момент уже гарантированно выбран, секция с этой формой
+  // просто не показывается, пока это не так (см. renderAlbums()/loadPhotos()).
+  if (fileInput) {
+    fileInput.addEventListener("change", async () => {
       const file = fileInput.files && fileInput.files[0];
-      if (!file) { alert("Выбери файл"); return; }
-      if (!currentAlbumId) { alert("Сначала выбери или создай альбом"); return; }
+      if (!file || !currentAlbumId) return;
       const form = new FormData();
       form.append("photo", file);
       try {
         await apiRequest(`/api/albums/${encodeURIComponent(currentAlbumId)}/photos`, { method: "POST", body: form });
         fileInput.value = "";
         loadPhotos(currentAlbumId, currentAlbumEl ? currentAlbumEl.textContent : "");
-      } catch (err) { alert("Ошибка загрузки: " + err.message); }
+      } catch (err) {
+        alert("Ошибка загрузки: " + err.message);
+      }
     });
   }
 
@@ -4340,17 +5475,17 @@ document.addEventListener("DOMContentLoaded", () => {
   }
 
   if (path.endsWith("music.html")) {
-    initMediaPage("music");
+    initMusicPage();
     return;
   }
 
   if (path.endsWith("video.html")) {
-    initMediaPage("video");
+    initVideoPage();
     return;
   }
 
   if (path.endsWith("books.html")) {
-    initMediaPage("books");
+    initBooksPage();
     return;
   }
 

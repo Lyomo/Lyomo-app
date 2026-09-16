@@ -18,15 +18,35 @@
       <header id="headerRoot"></header>
 
       <section>
-        <h2>Видео</h2>
-        <p class="muted">Добавляй фильмы, сериалы, клипы или ссылки на видео.</p>
+        <p class="muted">Загружай свои видео или добавляй ссылки на YouTube.</p>
 
-        <div class="media-form">
-          <input id="videoInput" placeholder="Название или ссылка на видео..." />
-          <button id="videoAdd" class="btn primary">Добавить</button>
+        <div class="media-upload-row">
+          <label class="btn primary custom-file-upload mobile-fab-trigger">
+            <input type="file" id="videoFileInput" accept="video/*" hidden>
+            <span class="btn-label">Загрузить видео</span>
+            <span class="fab-icon" aria-hidden="true"><svg viewBox="0 0 24 24" width="24" height="24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 4.5v15M4.5 12h15"/></svg></span>
+          </label>
+          <button type="button" id="videoAddLinkBtn" class="btn">Добавить по ссылке</button>
         </div>
 
-        <ul id="videoList" class="media-list"></ul>
+        <div id="videoUploadForm" class="media-add-form" hidden>
+          <input id="videoTitleInput" placeholder="Название видео">
+          <div class="media-add-form-actions">
+            <button id="videoConfirmUpload" class="btn primary">Загрузить</button>
+            <button id="videoCancelUpload" class="btn">Отмена</button>
+          </div>
+        </div>
+
+        <div id="videoLinkForm" class="media-add-form" hidden>
+          <input id="videoLinkInput" placeholder="Ссылка на видео (например, YouTube)">
+          <input id="videoLinkTitleInput" placeholder="Название (необязательно)">
+          <div class="media-add-form-actions">
+            <button id="videoConfirmLink" class="btn primary">Добавить</button>
+            <button id="videoCancelLink" class="btn">Отмена</button>
+          </div>
+        </div>
+
+        <div id="videoList" class="video-grid"></div>
       </section>
     </div>
   </div>

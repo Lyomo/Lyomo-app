@@ -18,9 +18,15 @@
       <header id="headerRoot"></header>
 
       <section class="profile-card" style="margin-bottom:16px;">
+        <div class="profile-avatar-wrap">
+          <div id="groupViewAvatar" class="avatar-edit-preview" style="width:96px;height:96px;font-size:32px;margin:0 auto;"></div>
+        </div>
         <h2 id="groupViewName">Группа</h2>
         <p id="groupViewDescription" class="profile-about"></p>
-        <p id="groupViewMembers" class="muted"></p>
+        <div style="display:flex;align-items:center;gap:8px;">
+          <span id="groupViewCategory" class="chip"></span>
+          <p id="groupViewMembers" class="muted" style="margin:0;"></p>
+        </div>
         <div id="groupActions" style="margin-top:8px;display:flex;gap:8px;"></div>
       </section>
 

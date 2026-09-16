@@ -45,6 +45,50 @@ function verifyPassword(password, stored) {
   return hashBuffer.length === testHash.length && crypto.timingSafeEqual(hashBuffer, testHash);
 }
 
+// Логин — технический идентификатор (не отображаемое имя, см. displayName) —
+// только латиница/цифры/точка/подчёркивание, без пробелов. Проверяется и на
+// клиенте (auth.html), и здесь — сервер никогда не должен доверять клиентской
+// валидации как единственной линии защиты.
+const LOGIN_FORMAT_RE = /^[A-Za-z0-9_.]{3,32}$/;
+const MIN_PASSWORD_LENGTH = 6;
+
+// Имя/фамилия при регистрации — в отличие от логина, это реальное имя
+// человека (любой алфавит), поэтому \p{L} (юникодная категория "буква"),
+// плюс дефис и апостроф для составных имён ("Анна-Мария", "O'Brien").
+// Складываются в единый users.displayName при регистрации — отдельных
+// колонок firstName/lastName нет: displayName и так уже единственное
+// редактируемое пользователем "видимое" имя везде в проекте (см. "Мой
+// аккаунт"), заводить рядом второй, слабо связанный набор полей не стали.
+const NAME_FORMAT_RE = /^\p{L}[\p{L}\-' ]{0,49}$/u;
+
+// Категории групп — фиксированный список (не свободные теги, см. db.js).
+// Ключи должны совпадать с value у <option>/чипов в groups.html — это
+// единственное место, которое их валидирует, клиент просто отправляет то,
+// что выбрано в <select>.
+const GROUP_CATEGORY_KEYS = new Set(["it", "fun", "games", "education", "music", "movies", "other"]);
+const DEFAULT_GROUP_CATEGORY = "other";
+
+// Дата рождения — формат нативного <input type="date"> на клиенте
+// ("YYYY-MM-DD"), проверяем и здесь тем же строковым regex, а не просто
+// new Date(...), потому что new Date("2024-13-45") в JS не бросает
+// исключение, а тихо даёт Invalid Date (уже отдельно проверяется ниже) —
+// но регексп сразу отсеивает совсем не тот формат (например, DD.MM.YYYY).
+const BIRTH_DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
+const MIN_REGISTRATION_AGE = 13;
+
+// Возраст на сегодня по дате рождения "YYYY-MM-DD" — учитывает месяц/день,
+// не просто разницу годов (иначе человек, которому исполнится 13 только
+// через полгода, прошёл бы проверку уже сегодня).
+function calculateAge(birthDateStr) {
+  const [y, m, d] = birthDateStr.split("-").map(Number);
+  const birth = new Date(y, m - 1, d);
+  const now = new Date();
+  let age = now.getFullYear() - birth.getFullYear();
+  const monthDiff = now.getMonth() - birth.getMonth();
+  if (monthDiff < 0 || (monthDiff === 0 && now.getDate() < birth.getDate())) age--;
+  return age;
+}
+
 const ID_LETTERS = "ABCDEFGHIJKLMNOPQRSTUVWXYZ";
 
 // ID пользователя — 6 цифр + 2 заглавные буквы (например "482913XQ"),
@@ -164,6 +208,23 @@ const uploadAny = multer({
   fileFilter: (req, file, cb) => cb(null, !DANGEROUS_EXT.has(path.extname(file.originalname).toLowerCase()))
 });
 
+// Для раздела "Музыка" — только звук, лимит поменьше видео.
+const uploadAudio = multer({
+  storage: uploadStorage,
+  limits: { fileSize: 15 * 1024 * 1024 },
+  fileFilter: (req, file, cb) => cb(null, file.mimetype.startsWith("audio/"))
+});
+
+// Для раздела "Видео" (свои файлы, не ссылки) — лимит больше остальных,
+// это тяжёлые файлы; как и везде в проекте, без сигнатурной проверки
+// содержимого (та есть только у картинок, см. isRealImage) — только
+// mimetype на входе, тот же уровень строгости, что у общего /api/upload.
+const uploadVideo = multer({
+  storage: uploadStorage,
+  limits: { fileSize: 60 * 1024 * 1024 },
+  fileFilter: (req, file, cb) => cb(null, file.mimetype.startsWith("video/"))
+});
+
 // busboy (которым пользуется multer) по умолчанию декодирует имя файла из
 // multipart-заголовка как latin1, а не utf8 — с русскими/любыми не-ASCII
 // именами это даёт кракозябры ("Ð¡ÐºÑÐ¸Ð½..."). Перекодируем обратно.
@@ -198,7 +259,7 @@ function rejectIfFakeImage(file) {
 const stmts = {
   findUserByLogin: db.prepare("SELECT * FROM users WHERE login = ?"),
   findUserById: db.prepare("SELECT * FROM users WHERE id = ?"),
-  insertUser: db.prepare("INSERT INTO users (id, login, password, avatarUrl, isAdmin, createdAt) VALUES (?, ?, ?, ?, 0, ?)"),
+  insertUser: db.prepare("INSERT INTO users (id, login, password, avatarUrl, isAdmin, createdAt, termsAcceptedAt, displayName, birthDate) VALUES (?, ?, ?, ?, 0, ?, ?, ?, ?)"),
   updatePassword: db.prepare("UPDATE users SET password = ? WHERE id = ?"),
   updateUserProfile: db.prepare("UPDATE users SET avatarUrl = ?, about = ?, displayName = ? WHERE id = ?"),
 
@@ -212,7 +273,12 @@ const stmts = {
   countAllGroups: db.prepare("SELECT COUNT(*) AS c FROM groups"),
   countAllPhotos: db.prepare("SELECT COUNT(*) AS c FROM photos"),
   countAllStories: db.prepare("SELECT COUNT(*) AS c FROM stories"),
-  listAllUsers: db.prepare("SELECT * FROM users WHERE login LIKE ? ORDER BY (createdAt IS NULL), createdAt DESC"),
+  // Без LIKE-фильтра в самом запросе — фильтрация по логину/имени теперь
+  // делается в JS (см. /api/admin/users), потому что встроенный LIKE в
+  // SQLite регистронезависим только для ASCII: "логин LIKE '%иван%'" не
+  // находит "Иван" (кириллица не участвует в его case-folding), а обычный
+  // JS .toLowerCase() кириллицу схлопывает корректно.
+  listAllUsers: db.prepare("SELECT * FROM users ORDER BY (createdAt IS NULL), createdAt DESC"),
   setUserAdmin: db.prepare("UPDATE users SET isAdmin = ? WHERE id = ?"),
   setUserBanned: db.prepare("UPDATE users SET isBanned = ? WHERE id = ?"),
   deleteUser: db.prepare("DELETE FROM users WHERE id = ?"),
@@ -267,11 +333,14 @@ const stmts = {
   listChatReports: db.prepare("SELECT * FROM chat_reports ORDER BY createdAt DESC"),
   deleteChatReport: db.prepare("DELETE FROM chat_reports WHERE id = ?"),
 
-  // Поиск людей: подстрока логина ИЛИ точное совпадение ID — одна строка поиска.
-  // login нигде не показывается в UI (см. CLAUDE.md) — поиск только по нему
-  // означал, что человек не мог найти собеседника по имени, которое реально
-  // видит (displayName), только по техническому логину или точному ID.
-  searchUsers: db.prepare("SELECT * FROM users WHERE (login LIKE ? OR displayName LIKE ? OR id = ?) AND id <> ? ORDER BY login LIMIT 20"),
+  // Поиск людей: раньше был SQL LIKE по login/displayName прямо здесь, но
+  // встроенный LIKE в SQLite регистронезависим только для ASCII — "Иван"
+  // не находился по запросу "иван" (кириллица не участвует в его
+  // case-folding). Фильтрация по логину/имени переехала в JS (см.
+  // /api/users), где обычный .toLowerCase() схлопывает кириллицу
+  // корректно; этот стейтмент отдаёт всех, кроме себя, а сравнение — уже
+  // в обработчике роута.
+  listUsersExceptSelf: db.prepare("SELECT * FROM users WHERE id <> ?"),
 
   insertPost: db.prepare("INSERT INTO posts (id, ownerType, ownerId, authorId, text, photoUrl, createdAt, moderationStatus, moderationReason) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)"),
   findPostById: db.prepare("SELECT * FROM posts WHERE id = ?"),
@@ -320,7 +389,7 @@ const stmts = {
     ORDER BY f.createdAt DESC
   `),
 
-  insertGroup: db.prepare("INSERT INTO groups (id, name, description, avatarUrl, ownerId, createdAt) VALUES (?, ?, ?, ?, ?, ?)"),
+  insertGroup: db.prepare("INSERT INTO groups (id, name, description, avatarUrl, ownerId, createdAt, category) VALUES (?, ?, ?, ?, ?, ?, ?)"),
   findGroupById: db.prepare("SELECT * FROM groups WHERE id = ?"),
   listGroups: db.prepare("SELECT * FROM groups ORDER BY createdAt DESC"),
   deleteGroup: db.prepare("DELETE FROM groups WHERE id = ?"),
@@ -339,6 +408,22 @@ const stmts = {
   listPhotosByAlbum: db.prepare("SELECT * FROM photos WHERE albumId = ? ORDER BY createdAt DESC"),
   findPhotoById: db.prepare("SELECT * FROM photos WHERE id = ?"),
   deletePhoto: db.prepare("DELETE FROM photos WHERE id = ?"),
+
+  insertTrack: db.prepare("INSERT INTO tracks (id, ownerId, title, artist, filename, originalName, createdAt) VALUES (?, ?, ?, ?, ?, ?, ?)"),
+  listTracksByOwner: db.prepare("SELECT * FROM tracks WHERE ownerId = ? ORDER BY createdAt DESC"),
+  findTrackById: db.prepare("SELECT * FROM tracks WHERE id = ?"),
+  deleteTrack: db.prepare("DELETE FROM tracks WHERE id = ?"),
+
+  insertVideo: db.prepare("INSERT INTO videos (id, ownerId, title, kind, filename, originalName, externalUrl, createdAt) VALUES (?, ?, ?, ?, ?, ?, ?, ?)"),
+  listVideosByOwner: db.prepare("SELECT * FROM videos WHERE ownerId = ? ORDER BY createdAt DESC"),
+  findVideoById: db.prepare("SELECT * FROM videos WHERE id = ?"),
+  deleteVideo: db.prepare("DELETE FROM videos WHERE id = ?"),
+
+  insertBook: db.prepare("INSERT INTO books (id, ownerId, title, author, coverUrl, status, link, createdAt) VALUES (?, ?, ?, ?, ?, ?, ?, ?)"),
+  listBooksByOwner: db.prepare("SELECT * FROM books WHERE ownerId = ? ORDER BY createdAt DESC"),
+  findBookById: db.prepare("SELECT * FROM books WHERE id = ?"),
+  updateBook: db.prepare("UPDATE books SET title = ?, author = ?, coverUrl = ?, status = ?, link = ? WHERE id = ?"),
+  deleteBook: db.prepare("DELETE FROM books WHERE id = ?"),
 
   insertStory: db.prepare("INSERT INTO stories (id, ownerId, photoUrl, createdAt) VALUES (?, ?, ?, ?)"),
   findStoryById: db.prepare("SELECT * FROM stories WHERE id = ?"),
@@ -369,7 +454,16 @@ const stmts = {
       ))
     ORDER BY p.createdAt DESC
     LIMIT 50
-  `)
+  `),
+
+  // ===== Пользовательское соглашение (редактируется из админки) =====
+  listTerms: db.prepare("SELECT * FROM terms_content"),
+  getTermsByLang: db.prepare("SELECT * FROM terms_content WHERE lang = ?"),
+  upsertTerms: db.prepare(`
+    INSERT INTO terms_content (lang, label, title, body, updatedAt)
+    VALUES (?, ?, ?, ?, ?)
+    ON CONFLICT(lang) DO UPDATE SET title = excluded.title, body = excluded.body, updatedAt = excluded.updatedAt
+  `),
 };
 
 // Одноразовая миграция: раньше пароли хранились в БД в открытом виде —
@@ -388,6 +482,88 @@ const stmts = {
   if (migrated > 0) console.log(`🔒 Пароли ${migrated} пользователей переведены на хеш (scrypt).`);
 })();
 
+// Дефолтный текст пользовательского соглашения (4 языка) — используется
+// ТОЛЬКО как разовый посев в terms_content при пустой таблице (первый
+// запуск сервера или свежая БД). После этого единственный источник
+// правды — сама таблица, редактируется через PATCH /api/admin/terms/:lang
+// (admin.html). "body" — один параграф на строку, тот же формат, что и в
+// <textarea> редактора в админке.
+const DEFAULT_TERMS = {
+  ru: {
+    label: "RU",
+    title: "Пользовательское соглашение LÖMO",
+    body: [
+      "1. LÖMO — некоммерческий, экспериментальный проект одного разработчика (pet-проект), не связан с крупными компаниями и работает «как есть».",
+      "2. Аккаунт. Логин и пароль вы придумываете сами; администрация не хранит и не может восстановить забытый пароль (почта или телефон к аккаунту не привязываются) — ответственность за сохранность данных для входа лежит на вас.",
+      "3. Ваш контент. Публикуя посты, комментарии, фото, музыку, видео и другой контент, вы подтверждаете, что имеете на это право, и разрешаете показывать его другим пользователям сети в рамках обычной работы сервиса (лента, стена, чат и т.п.). Права на сам контент остаются за вами.",
+      "4. Что запрещено. Оскорбления, разжигание ненависти и вражды по любому признаку, угрозы, спам, реклама без разрешения, загрузка чужого контента без прав, попытки взлома или эксплуатации уязвимостей.",
+      "5. Модерация. Часть текста и изображений проверяется автоматическим фильтром; публикации, нарушающие правила, могут быть скрыты или удалены, а аккаунт — заблокирован администрацией без предварительного уведомления.",
+      "6. Данные. Вся информация хранится в базе данных проекта на сервере; она не продаётся и не передаётся третьим лицам. Администраторы технически имеют доступ к содержимому в целях модерации.",
+      "7. Отказ от гарантий. Сервис — некоммерческий эксперимент, предоставляется «как есть», без гарантий бесперебойной работы; данные могут быть утеряны при технических сбоях или перезапуске сервера — делайте резервные копии важного вам содержимого самостоятельно, если это критично.",
+      "8. Возраст. Сервисом не рекомендуется пользоваться лицам младше 13 лет.",
+      "9. Изменения. Это соглашение может быть изменено; продолжая пользоваться LÖMO после изменений, вы соглашаетесь с новой версией.",
+      "10. Согласие. Регистрируясь, вы подтверждаете, что прочитали и принимаете условия этого соглашения.",
+    ].join("\n"),
+  },
+  uk: {
+    label: "UA",
+    title: "Угода користувача LÖMO",
+    body: [
+      "1. LÖMO — некомерційний, експериментальний проєкт одного розробника (pet-проєкт), не пов'язаний із великими компаніями і працює «як є».",
+      "2. Обліковий запис. Логін і пароль ви вигадуєте самостійно; адміністрація не зберігає і не може відновити забутий пароль (пошта чи телефон до акаунта не прив'язуються) — відповідальність за збереження даних для входу лежить на вас.",
+      "3. Ваш контент. Публікуючи пости, коментарі, фото, музику, відео та інший контент, ви підтверджуєте, що маєте на це право, і дозволяєте показувати його іншим користувачам мережі в межах звичайної роботи сервісу (стрічка, стіна, чат тощо). Права на сам контент залишаються за вами.",
+      "4. Що заборонено. Образи, розпалювання ненависті та ворожнечі за будь-якою ознакою, погрози, спам, реклама без дозволу, завантаження чужого контенту без прав, спроби зламу або експлуатації вразливостей.",
+      "5. Модерація. Частина тексту та зображень перевіряється автоматичним фільтром; публікації, що порушують правила, можуть бути приховані або видалені, а обліковий запис — заблокований адміністрацією без попереднього повідомлення.",
+      "6. Дані. Уся інформація зберігається в базі даних проєкту на сервері; вона не продається і не передається третім особам. Адміністратори технічно мають доступ до вмісту з метою модерації.",
+      "7. Відмова від гарантій. Сервіс є некомерційним експериментом, надається «як є», без гарантій безперебійної роботи; дані можуть бути втрачені через технічні збої або перезапуск сервера — робіть резервні копії важливого вам вмісту самостійно, якщо це критично.",
+      "8. Вік. Сервісом не рекомендується користуватися особам молодше 13 років.",
+      "9. Зміни. Ця угода може бути змінена; продовжуючи користуватися LÖMO після змін, ви погоджуєтесь із новою версією.",
+      "10. Згода. Реєструючись, ви підтверджуєте, що прочитали і приймаєте умови цієї угоди.",
+    ].join("\n"),
+  },
+  en: {
+    label: "EN",
+    title: "LÖMO Terms of Service",
+    body: [
+      "1. LÖMO is a non-commercial, experimental one-developer pet project, not affiliated with any large company, and is provided “as is”.",
+      "2. Your account. You choose your own login and password; the administration does not store and cannot recover a forgotten password (no email or phone is linked to the account) — you are responsible for keeping your login credentials safe.",
+      "3. Your content. By posting posts, comments, photos, music, videos and other content, you confirm you have the right to do so, and you allow it to be shown to other users as part of the normal operation of the service (feed, wall, chat, etc.). You keep the rights to your own content.",
+      "4. Prohibited. Insults, incitement of hatred or hostility on any ground, threats, spam, unauthorized advertising, uploading someone else's content without rights, attempts to hack or exploit vulnerabilities.",
+      "5. Moderation. Some text and images are checked by an automated filter; publications that violate the rules may be hidden or removed, and the account may be banned by the administration without prior notice.",
+      "6. Data. All information is stored in the project's database on the server; it is not sold or shared with third parties. Administrators technically have access to content for moderation purposes.",
+      "7. Disclaimer. The service is a non-commercial experiment provided “as is”, with no guarantee of uninterrupted operation; data may be lost due to technical failures or server restarts — back up anything important to you yourself if it matters.",
+      "8. Age. The service is not recommended for people under 13 years old.",
+      "9. Changes. This agreement may change; by continuing to use LÖMO after changes, you agree to the new version.",
+      "10. Consent. By registering, you confirm that you have read and accept the terms of this agreement.",
+    ].join("\n"),
+  },
+  es: {
+    label: "ES",
+    title: "Acuerdo de usuario de LÖMO",
+    body: [
+      "1. LÖMO es un proyecto experimental, no comercial, de un solo desarrollador (proyecto personal), sin relación con ninguna gran empresa, y se ofrece «tal cual».",
+      "2. Tu cuenta. Eliges tu propio nombre de usuario y contraseña; la administración no almacena ni puede recuperar una contraseña olvidada (no hay correo ni teléfono vinculado a la cuenta) — eres responsable de mantener seguros tus datos de acceso.",
+      "3. Tu contenido. Al publicar publicaciones, comentarios, fotos, música, vídeos y otro contenido, confirmas que tienes derecho a hacerlo y permites que se muestre a otros usuarios como parte del funcionamiento normal del servicio (feed, muro, chat, etc.). Conservas los derechos sobre tu propio contenido.",
+      "4. Prohibido. Insultos, incitación al odio o a la hostilidad por cualquier motivo, amenazas, spam, publicidad no autorizada, subir contenido ajeno sin derechos, intentos de hackear o explotar vulnerabilidades.",
+      "5. Moderación. Parte del texto y las imágenes se revisan mediante un filtro automático; las publicaciones que infrinjan las normas pueden ocultarse o eliminarse, y la cuenta puede ser bloqueada por la administración sin previo aviso.",
+      "6. Datos. Toda la información se almacena en la base de datos del proyecto en el servidor; no se vende ni se comparte con terceros. Los administradores tienen acceso técnico al contenido con fines de moderación.",
+      "7. Exención de garantías. El servicio es un experimento no comercial ofrecido «tal cual», sin garantía de funcionamiento ininterrumpido; los datos pueden perderse por fallos técnicos o reinicios del servidor — haz tus propias copias de seguridad de lo que sea importante para ti.",
+      "8. Edad. No se recomienda el uso del servicio a personas menores de 13 años.",
+      "9. Cambios. Este acuerdo puede modificarse; si continúas usando LÖMO después de los cambios, aceptas la nueva versión.",
+      "10. Consentimiento. Al registrarte, confirmas que has leído y aceptas los términos de este acuerdo.",
+    ].join("\n"),
+  },
+};
+
+(function seedDefaultTerms() {
+  if (stmts.listTerms.all().length > 0) return;
+  const now = Date.now();
+  for (const [lang, data] of Object.entries(DEFAULT_TERMS)) {
+    stmts.upsertTerms.run(lang, data.label, data.title, data.body, now);
+  }
+  console.log("📄 Пользовательское соглашение засеяно дефолтным текстом на 4 языках.");
+})();
+
 // В friendships пара id всегда хранится как (меньший, больший), чтобы
 // не завести одновременно (A,B) и (B,A) для одной и той же дружбы.
 function friendPair(idA, idB) {
@@ -401,6 +577,23 @@ function displayNameOf(user) {
   return (user && (user.displayName || user.login)) || "?";
 }
 
+// Общий поиск по людям — логин ИЛИ отображаемое имя (значит имя+фамилия,
+// см. displayName при регистрации) ИЛИ точный ID, регистронезависимо для
+// ЛЮБОГО алфавита. Сравнение через JS .toLowerCase(), а не SQL LIKE —
+// LIKE в SQLite регистронезависим только для ASCII, кириллица (и вообще
+// всё не-ASCII) им не схлопывается ("Иван" не находился по "иван").
+// Используется и в /api/users (поиск для друзей/личных диалогов), и в
+// /api/admin/users (поиск в админке) — раньше там была разная, отдельно
+// поддерживаемая логика с разным набором полей.
+function matchesUserQuery(user, query) {
+  const q = query.toLowerCase();
+  return (
+    user.id === query ||
+    user.login.toLowerCase().includes(q) ||
+    (user.displayName || "").toLowerCase().includes(q)
+  );
+}
+
 // Честные счётчики "фото/видео/файлы/ссылки" для модалки "Информация о
 // группе" — категоризация вложений по расширению файла и поиск ссылок
 // простым regex по тексту сообщения. Не отдельная СУЩНОСТЬ (галерея с
@@ -409,6 +602,27 @@ function displayNameOf(user) {
 const MEDIA_IMAGE_EXT = new Set(["jpg", "jpeg", "png", "gif", "webp", "svg", "avif"]);
 const MEDIA_VIDEO_EXT = new Set(["mp4", "webm", "mov", "ogg", "mkv"]);
 const MEDIA_URL_RE = /https?:\/\/\S+/i;
+
+// Достаёт ID видео из обычных форматов ссылок YouTube (watch?v=, youtu.be/,
+// shorts/, embed/) — нужен, чтобы честно встроить плеер (iframe embed),
+// а не просто выводить кликабельную ссылку. Для всего, что не YouTube,
+// возвращает null — клиент в этом случае просто показывает ссылку
+// "Открыть" вместо плеера (никаких сторонних embed-провайдеров не
+// парсим, это уже отдельная, гораздо большая задача).
+function parseYouTubeId(url) {
+  if (!url || typeof url !== "string") return null;
+  const patterns = [
+    /(?:youtube\.com\/watch\?v=)([\w-]{11})/,
+    /(?:youtu\.be\/)([\w-]{11})/,
+    /(?:youtube\.com\/shorts\/)([\w-]{11})/,
+    /(?:youtube\.com\/embed\/)([\w-]{11})/
+  ];
+  for (const re of patterns) {
+    const m = url.match(re);
+    if (m) return m[1];
+  }
+  return null;
+}
 
 function extensionOf(url) {
   const match = /\.([a-z0-9]+)(?:\?.*)?$/i.exec(url || "");
@@ -437,6 +651,7 @@ function toPublicUser(user) {
     displayName: user.displayName || "",
     avatarUrl: user.avatarUrl,
     about: user.about || "",
+    birthDate: user.birthDate || "",
     isAdmin: !!user.isAdmin
   };
 }
@@ -514,6 +729,7 @@ function toGroupPayload(group) {
     avatarUrl: group.avatarUrl,
     ownerId: group.ownerId,
     createdAt: group.createdAt,
+    category: group.category || DEFAULT_GROUP_CATEGORY,
     membersCount: stmts.countMembers.get(group.id).c
   };
 }
@@ -550,13 +766,48 @@ function requireAdmin(req, res, next) {
 
 // API
 app.post("/api/register", (req, res) => {
-  const { login, password, avatarUrl } = req.body;
+  const { login, password, avatarUrl, agreedToTerms, website, firstName, lastName, birthDate } = req.body;
   try {
+    // Honeypot — поле "website" на клиенте (auth.html) уведено за пределы
+    // экрана и невидимо человеку; заполняет его только бот, слепо
+    // проходящий по всем полям формы. Отвечаем той же формой ошибки, что и
+    // остальная валидация, — не подсказываем боту, что именно его спалило.
+    if (website) return res.status(400).json({ error: "Не удалось выполнить регистрацию" });
     if (!login || !password) return res.status(400).json({ error: "Укажи логин и пароль" });
+    if (!LOGIN_FORMAT_RE.test(login)) {
+      return res.status(400).json({ error: "Логин: 3–32 символа, латиница, цифры, точка или подчёркивание, без пробелов" });
+    }
+    if (password.length < MIN_PASSWORD_LENGTH) {
+      return res.status(400).json({ error: `Пароль минимум ${MIN_PASSWORD_LENGTH} символов` });
+    }
+    const first = typeof firstName === "string" ? firstName.trim() : "";
+    const last  = typeof lastName === "string" ? lastName.trim() : "";
+    if (!NAME_FORMAT_RE.test(first) || !NAME_FORMAT_RE.test(last)) {
+      return res.status(400).json({ error: "Укажи имя и фамилию (только буквы, дефис или апостроф)" });
+    }
+    if (typeof birthDate !== "string" || !BIRTH_DATE_RE.test(birthDate) || isNaN(new Date(birthDate).getTime())) {
+      return res.status(400).json({ error: "Укажи корректную дату рождения" });
+    }
+    if (new Date(birthDate).getTime() > Date.now()) {
+      return res.status(400).json({ error: "Дата рождения не может быть в будущем" });
+    }
+    const age = calculateAge(birthDate);
+    if (age < MIN_REGISTRATION_AGE) {
+      return res.status(400).json({ error: `LÖMO не для тех, кому меньше ${MIN_REGISTRATION_AGE} лет` });
+    }
+    if (age > 120) {
+      return res.status(400).json({ error: "Проверь дату рождения — похоже на опечатку" });
+    }
+    if (!agreedToTerms) {
+      return res.status(400).json({ error: "Нужно принять пользовательское соглашение" });
+    }
     const existing = stmts.findUserByLogin.get(login);
     if (existing) return res.status(400).json({ error: "Логин занят" });
-    const user = { id: generateUserId(), login, password: hashPassword(password), avatarUrl: avatarUrl || "", isAdmin: 0, createdAt: Date.now() };
-    stmts.insertUser.run(user.id, user.login, user.password, user.avatarUrl, user.createdAt);
+    const user = {
+      id: generateUserId(), login, password: hashPassword(password), avatarUrl: avatarUrl || "",
+      isAdmin: 0, createdAt: Date.now(), termsAcceptedAt: Date.now(), displayName: `${first} ${last}`, birthDate
+    };
+    stmts.insertUser.run(user.id, user.login, user.password, user.avatarUrl, user.createdAt, user.termsAcceptedAt, user.displayName, user.birthDate);
     const token = jwt.sign(
       { id: user.id, login: user.login, isAdmin: false },
       JWT_SECRET,
@@ -581,6 +832,21 @@ app.post("/api/login", (req, res) => {
     );
     res.json({ ...toPublicUser(user), token });
   } catch (e) { res.status(500).json({ error: "Ошибка входа" }); }
+});
+
+// Пользовательское соглашение — публичный роут (без requireAuth), т.к.
+// модалка на auth.html открывается ДО входа, во время регистрации.
+// Редактирование — только через PATCH /api/admin/terms/:lang (см. ниже,
+// секция "Админка").
+app.get("/api/terms", (req, res) => {
+  try {
+    const rows = stmts.listTerms.all();
+    const result = {};
+    for (const row of rows) {
+      result[row.lang] = { label: row.label, title: row.title, body: row.body };
+    }
+    res.json(result);
+  } catch (e) { res.status(500).json({ error: "Не удалось загрузить соглашение" }); }
 });
 
 // Возвращает данные текущего пользователя по токену
@@ -624,7 +890,10 @@ app.get("/api/users", requireAuth, (req, res) => {
   try {
     const q = (req.query.q || "").trim();
     if (!q) return res.json([]);
-    const rows = stmts.searchUsers.all(`%${q}%`, `%${q}%`, q, req.user.id);
+    const rows = stmts.listUsersExceptSelf.all(req.user.id)
+      .filter((u) => matchesUserQuery(u, q))
+      .sort((a, b) => a.login.localeCompare(b.login))
+      .slice(0, 20);
     res.json(rows.map(toPublicUser));
   } catch (e) { res.status(500).json({ error: "Ошибка поиска" }); }
 });
@@ -835,17 +1104,48 @@ app.post("/api/groups", requireAuth, (req, res) => {
     if (!name) return res.status(400).json({ error: "Укажи название группы" });
     const description = (req.body.description || "").trim();
     const avatarUrl = (req.body.avatarUrl || "").trim();
+    const category = GROUP_CATEGORY_KEYS.has(req.body.category) ? req.body.category : DEFAULT_GROUP_CATEGORY;
     const id = crypto.randomUUID();
     const now = Date.now();
-    stmts.insertGroup.run(id, name, description, avatarUrl, req.user.id, now);
+    stmts.insertGroup.run(id, name, description, avatarUrl, req.user.id, now, category);
     stmts.insertMember.run(id, req.user.id, "owner", now);
     res.json(toGroupPayload(stmts.findGroupById.get(id)));
   } catch (e) { res.status(500).json({ error: "Ошибка создания группы" }); }
 });
 
+// Поиск/фильтрация — по совету дизайн-ревью (см. CLAUDE.md): текстовый
+// поиск по названию/описанию (регистронезависимо для любого алфавита,
+// сравнение в JS — та же причина, что и у поиска людей: SQL LIKE в SQLite
+// не схлопывает кириллицу), фильтр по категории, вкладка "мои группы"
+// (состою ИЛИ владею), сортировка по популярности (число участников,
+// дефолт) или по дате создания. На масштабе этого проекта (не тысячи
+// групп) вытащить все и отфильтровать/отсортировать в JS — не проблема
+// производительности.
 app.get("/api/groups", requireAuth, (req, res) => {
   try {
-    res.json(stmts.listGroups.all().map(toGroupPayload));
+    const q = (req.query.q || "").trim().toLowerCase();
+    const category = req.query.category || "";
+    const mine = req.query.mine === "1" || req.query.mine === "true";
+    const sort = req.query.sort === "new" ? "new" : "popular";
+
+    let rows = stmts.listGroups.all().map(toGroupPayload);
+
+    if (mine) {
+      rows = rows.filter((g) => g.ownerId === req.user.id || stmts.findMember.get(g.id, req.user.id));
+    }
+    if (category && category !== "all") {
+      rows = rows.filter((g) => g.category === category);
+    }
+    if (q) {
+      rows = rows.filter((g) =>
+        g.name.toLowerCase().includes(q) || (g.description || "").toLowerCase().includes(q)
+      );
+    }
+    rows.sort(sort === "new"
+      ? (a, b) => b.createdAt - a.createdAt
+      : (a, b) => b.membersCount - a.membersCount || b.createdAt - a.createdAt);
+
+    res.json(rows);
   } catch (e) { res.status(500).json({ error: "Ошибка загрузки групп" }); }
 });
 
@@ -949,6 +1249,148 @@ app.delete("/api/photos/:id", requireAuth, (req, res) => {
   } catch (e) { res.status(500).json({ error: "Ошибка удаления фото" }); }
 });
 
+// ===== Музыка — реальные загруженные файлы, честный список своих треков =====
+
+function toTrackPayload(t) {
+  return { id: t.id, ownerId: t.ownerId, title: t.title, artist: t.artist, createdAt: t.createdAt, url: `/uploads/${t.filename}` };
+}
+
+app.post("/api/tracks", requireAuth, uploadAudio.single("file"), (req, res) => {
+  try {
+    if (!req.file) return res.status(400).json({ error: "Нужен аудиофайл" });
+    const originalName = fixFilenameEncoding(req.file.originalname);
+    const title = (req.body.title || "").trim() || originalName.replace(/\.[^.]+$/, "");
+    const artist = (req.body.artist || "").trim();
+    const id = crypto.randomUUID();
+    const createdAt = Date.now();
+    stmts.insertTrack.run(id, req.user.id, title, artist, req.file.filename, originalName, createdAt);
+    res.json(toTrackPayload({ id, ownerId: req.user.id, title, artist, filename: req.file.filename, createdAt }));
+  } catch (e) { res.status(500).json({ error: "Ошибка загрузки трека" }); }
+});
+
+app.get("/api/tracks", requireAuth, (req, res) => {
+  try {
+    res.json(stmts.listTracksByOwner.all(req.user.id).map(toTrackPayload));
+  } catch (e) { res.status(500).json({ error: "Ошибка загрузки музыки" }); }
+});
+
+app.delete("/api/tracks/:id", requireAuth, (req, res) => {
+  try {
+    const track = stmts.findTrackById.get(req.params.id);
+    if (!track) return res.status(404).json({ error: "Трек не найден" });
+    if (track.ownerId !== req.user.id && !req.user.isAdmin) return res.status(403).json({ error: "Это не ваш трек" });
+    fs.unlink(path.join(UPLOADS_DIR, track.filename), () => {});
+    stmts.deleteTrack.run(track.id);
+    res.json({ ok: true });
+  } catch (e) { res.status(500).json({ error: "Ошибка удаления трека" }); }
+});
+
+// ===== Видео — свой загруженный файл ИЛИ внешняя ссылка (YouTube embed,
+// остальное — просто кликабельная ссылка на клиенте) =====
+
+function toVideoPayload(v) {
+  const out = { id: v.id, ownerId: v.ownerId, title: v.title, kind: v.kind, createdAt: v.createdAt };
+  if (v.kind === "upload") {
+    out.url = `/uploads/${v.filename}`;
+  } else {
+    out.externalUrl = v.externalUrl;
+    out.youtubeId = parseYouTubeId(v.externalUrl);
+  }
+  return out;
+}
+
+app.post("/api/videos/upload", requireAuth, uploadVideo.single("file"), (req, res) => {
+  try {
+    if (!req.file) return res.status(400).json({ error: "Нужен видеофайл" });
+    const originalName = fixFilenameEncoding(req.file.originalname);
+    const title = (req.body.title || "").trim() || originalName.replace(/\.[^.]+$/, "");
+    const id = crypto.randomUUID();
+    const createdAt = Date.now();
+    stmts.insertVideo.run(id, req.user.id, title, "upload", req.file.filename, originalName, null, createdAt);
+    res.json(toVideoPayload({ id, ownerId: req.user.id, title, kind: "upload", filename: req.file.filename, createdAt }));
+  } catch (e) { res.status(500).json({ error: "Ошибка загрузки видео" }); }
+});
+
+app.post("/api/videos/link", requireAuth, (req, res) => {
+  try {
+    const externalUrl = (req.body.externalUrl || "").trim();
+    if (!externalUrl) return res.status(400).json({ error: "Нужна ссылка" });
+    if (!/^https?:\/\//i.test(externalUrl)) return res.status(400).json({ error: "Ссылка должна начинаться с http(s)://" });
+    const title = (req.body.title || "").trim() || externalUrl;
+    const id = crypto.randomUUID();
+    const createdAt = Date.now();
+    stmts.insertVideo.run(id, req.user.id, title, "link", null, null, externalUrl, createdAt);
+    res.json(toVideoPayload({ id, ownerId: req.user.id, title, kind: "link", externalUrl, createdAt }));
+  } catch (e) { res.status(500).json({ error: "Ошибка добавления ссылки" }); }
+});
+
+app.get("/api/videos", requireAuth, (req, res) => {
+  try {
+    res.json(stmts.listVideosByOwner.all(req.user.id).map(toVideoPayload));
+  } catch (e) { res.status(500).json({ error: "Ошибка загрузки видео" }); }
+});
+
+app.delete("/api/videos/:id", requireAuth, (req, res) => {
+  try {
+    const video = stmts.findVideoById.get(req.params.id);
+    if (!video) return res.status(404).json({ error: "Видео не найдено" });
+    if (video.ownerId !== req.user.id && !req.user.isAdmin) return res.status(403).json({ error: "Это не ваше видео" });
+    if (video.kind === "upload") fs.unlink(path.join(UPLOADS_DIR, video.filename), () => {});
+    stmts.deleteVideo.run(video.id);
+    res.json({ ok: true });
+  } catch (e) { res.status(500).json({ error: "Ошибка удаления видео" }); }
+});
+
+// ===== Книги — личная библиотека для чтения (карточки, не файлы) =====
+
+const BOOK_STATUSES = new Set(["want", "reading", "done"]);
+
+app.post("/api/books", requireAuth, (req, res) => {
+  try {
+    const title = (req.body.title || "").trim();
+    if (!title) return res.status(400).json({ error: "Нужно название" });
+    const author = (req.body.author || "").trim();
+    const coverUrl = (req.body.coverUrl || "").trim();
+    const link = (req.body.link || "").trim();
+    const status = BOOK_STATUSES.has(req.body.status) ? req.body.status : "want";
+    const id = crypto.randomUUID();
+    const createdAt = Date.now();
+    stmts.insertBook.run(id, req.user.id, title, author, coverUrl, status, link, createdAt);
+    res.json(stmts.findBookById.get(id));
+  } catch (e) { res.status(500).json({ error: "Ошибка добавления книги" }); }
+});
+
+app.get("/api/books", requireAuth, (req, res) => {
+  try {
+    res.json(stmts.listBooksByOwner.all(req.user.id));
+  } catch (e) { res.status(500).json({ error: "Ошибка загрузки книг" }); }
+});
+
+app.patch("/api/books/:id", requireAuth, (req, res) => {
+  try {
+    const book = stmts.findBookById.get(req.params.id);
+    if (!book) return res.status(404).json({ error: "Книга не найдена" });
+    if (book.ownerId !== req.user.id && !req.user.isAdmin) return res.status(403).json({ error: "Это не ваша книга" });
+    const title = typeof req.body.title === "string" && req.body.title.trim() ? req.body.title.trim() : book.title;
+    const author = typeof req.body.author === "string" ? req.body.author.trim() : book.author;
+    const coverUrl = typeof req.body.coverUrl === "string" ? req.body.coverUrl.trim() : book.coverUrl;
+    const link = typeof req.body.link === "string" ? req.body.link.trim() : book.link;
+    const status = BOOK_STATUSES.has(req.body.status) ? req.body.status : book.status;
+    stmts.updateBook.run(title, author, coverUrl, status, link, book.id);
+    res.json(stmts.findBookById.get(book.id));
+  } catch (e) { res.status(500).json({ error: "Ошибка обновления книги" }); }
+});
+
+app.delete("/api/books/:id", requireAuth, (req, res) => {
+  try {
+    const book = stmts.findBookById.get(req.params.id);
+    if (!book) return res.status(404).json({ error: "Книга не найдена" });
+    if (book.ownerId !== req.user.id && !req.user.isAdmin) return res.status(403).json({ error: "Это не ваша книга" });
+    stmts.deleteBook.run(book.id);
+    res.json({ ok: true });
+  } catch (e) { res.status(500).json({ error: "Ошибка удаления книги" }); }
+});
+
 // ===== Истории (сторис) — живут 24 часа, потом удаляются =====
 
 const STORY_TTL_MS = 24 * 60 * 60 * 1000;
@@ -1036,7 +1478,10 @@ app.get("/api/admin/stats", requireAuth, requireAdmin, (req, res) => {
 app.get("/api/admin/users", requireAuth, requireAdmin, (req, res) => {
   try {
     const q = (req.query.q || "").trim();
-    const rows = stmts.listAllUsers.all(`%${q}%`);
+    let rows = stmts.listAllUsers.all();
+    // Раньше искало только по логину — не находило по имени/фамилии
+    // (displayName), хотя именно их видно в самой таблице админки.
+    if (q) rows = rows.filter((u) => matchesUserQuery(u, q));
     res.json(rows.map(toAdminUser));
   } catch (e) { res.status(500).json({ error: "Ошибка загрузки пользователей" }); }
 });
@@ -1290,6 +1735,24 @@ app.delete("/api/admin/chat-reports/:id", requireAuth, requireAdmin, (req, res) 
   } catch (e) { res.status(500).json({ error: "Ошибка удаления жалобы" }); }
 });
 
+// Редактирование пользовательского соглашения — только заголовок и текст,
+// сам язык (:lang) и его подпись (label — "RU"/"UA"/"EN"/"ES") фиксированы
+// набором строк в DEFAULT_TERMS/terms_content, новый язык через этот роут
+// не завести (это уже фронтенд-задача — понадобится ещё вкладка в
+// admin.html и в модалке на auth.html).
+app.patch("/api/admin/terms/:lang", requireAuth, requireAdmin, (req, res) => {
+  try {
+    const { lang } = req.params;
+    const existing = stmts.getTermsByLang.get(lang);
+    if (!existing) return res.status(404).json({ error: "Неизвестный язык" });
+    const title = typeof req.body.title === "string" ? req.body.title.trim() : "";
+    const body  = typeof req.body.body === "string" ? req.body.body.trim() : "";
+    if (!title || !body) return res.status(400).json({ error: "Заголовок и текст соглашения не должны быть пустыми" });
+    stmts.upsertTerms.run(lang, existing.label, title, body, Date.now());
+    res.json({ lang, label: existing.label, title, body });
+  } catch (e) { res.status(500).json({ error: "Ошибка сохранения соглашения" }); }
+});
+
 // Ошибки multer (например, превышен лимит размера файла) не должны улетать
 // в дефолтный HTML-обработчик ошибок Express — отвечаем тем же JSON-форматом.
 app.use((err, req, res, next) => {
@@ -1370,13 +1833,37 @@ function broadcastDmPeerStatuses() {
 
 wss.on("connection", (ws, req) => {
   const url = new URL(req.url, `https://${req.headers.host}`);
-  const login = url.searchParams.get("login") || "Гость";
   let currentRoom = url.searchParams.get("room") || "public";
 
-  // WS всё ещё не проверяет JWT (см. известную проблему в CLAUDE.md), но
-  // забаненного хотя бы не пускаем писать в чат по логину.
+  // Раньше сервер верил query-параметру login на слово — любой, кто знал
+  // чужой login (публичный, виден в поиске/ссылках), мог подключиться к
+  // WS и слать сообщения от чужого имени (известная проблема #3 в
+  // CLAUDE.md). Теперь identity берётся ТОЛЬКО из подписанного JWT
+  // (тот же token, что уже хранится в localStorage и шлётся в
+  // Authorization для REST) — если токена нет, он просрочен или подделан,
+  // соединение сразу закрывается. Query-параметр login клиент больше не
+  // присылает вообще (см. connectWebSocket() в app.js).
+  const token = url.searchParams.get("token");
+  let payload;
+  try {
+    payload = token && jwt.verify(token, JWT_SECRET);
+  } catch (e) {
+    payload = null;
+  }
+  if (!payload || !payload.login) {
+    ws.close(4001, "unauthorized");
+    return;
+  }
+  const login = payload.login;
+
+  // Бан проверяем по актуальному состоянию БД (не по тому, что было
+  // зашито в токен при выдаче) — тот же принцип, что и у requireAuth.
   const connectingUser = stmts.findUserByLogin.get(login);
-  if (connectingUser && connectingUser.isBanned) {
+  if (!connectingUser) {
+    ws.close(4004, "user not found");
+    return;
+  }
+  if (connectingUser.isBanned) {
     ws.close(4003, "banned");
     return;
   }
