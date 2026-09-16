@@ -12,6 +12,12 @@ import db from "./db.js";
 import { moderateText, isRealImage } from "./moderation.js";
 
 const app = express();
+// За обратным прокси Render (и любым другим PaaS с прокси перед Node) —
+// без этого req.secure/req.protocol всегда были бы "http", даже когда
+// реальный внешний запрос пришёл по https. Нужно ниже для куки сайт-гейта
+// (флаг Secure) и в целом безобидно, если приложение не за прокси (просто
+// не используется).
+app.set("trust proxy", 1);
 const server = http.createServer(app);
 const PORT = process.env.PORT || 4000;
 
@@ -108,36 +114,130 @@ function generateUserId() {
 // ===== Временная защита сайта общим паролем =====
 // Пока проект не готов к публичному релизу, но уже висит на настоящем
 // домене — просили закрыть буквально ВСЁ (включая саму страницу входа)
-// одним общим логином/паролем поверх обычной системы аккаунтов, HTTP
-// Basic Auth (браузер сам покажет системное окошко). Включается только
-// если заданы ОБЕ переменные окружения — если их нет (обычный локальный
-// dev без .env-настройки этой пары), проверка просто не подключается,
-// ничего не меняется в поведении. Это САМЫЙ ПЕРВЫЙ middleware — раньше
-// cors()/статики/API, чтобы действительно ничего не отдавалось без пароля.
+// одним общим логином/паролем поверх обычной системы аккаунтов. Включается
+// только если заданы ОБЕ переменные окружения — если их нет (обычный
+// локальный dev без .env-настройки этой пары), проверка просто не
+// подключается, ничего не меняется в поведении. Это САМЫЙ ПЕРВЫЙ
+// middleware — раньше cors()/статики/API, чтобы действительно ничего не
+// отдавалось без пароля.
+//
+// [ИЗМЕНЕНО] Было HTTP Basic Auth (системное окошко браузера) — на
+// мобильных (особенно iOS Safari, особенно в PWA-режиме "на главном
+// экране") браузер ненадёжно кэширует Basic-заголовок для fetch/XHR-
+// запросов, а это почти все запросы приложения (/api/*, WS-хендшейк) —
+// окошко логина/пароля выскакивало заново почти на каждое действие,
+// жаловался пользователь ("постоянно просит логин"). Теперь — свой HTML-
+// экран с обычной формой (без alert/prompt, тот же принцип, что и везде
+// в проекте) + подписанная HMAC-кука на 180 дней: куки браузер сам
+// прикладывает к каждому запросу того же origin (включая fetch/WS),
+// в отличие от Basic-заголовка это не завязано на отдельный
+// браузерный кэш авторизации, который на мобильных вёл себя не так,
+// как на десктопе.
 const SITE_AUTH_USER = process.env.SITE_AUTH_USER;
 const SITE_AUTH_PASS = process.env.SITE_AUTH_PASS;
-if (SITE_AUTH_USER && SITE_AUTH_PASS) {
-  app.use((req, res, next) => {
-    const header = req.headers.authorization || "";
-    const [scheme, encoded] = header.split(" ");
-    if (scheme === "Basic" && encoded) {
-      let decoded = "";
-      try { decoded = Buffer.from(encoded, "base64").toString("utf8"); } catch (e) {}
-      const sep = decoded.indexOf(":");
-      const user = sep >= 0 ? decoded.slice(0, sep) : decoded;
-      const pass = sep >= 0 ? decoded.slice(sep + 1) : "";
-      const userBuf = Buffer.from(user);
-      const expectedUserBuf = Buffer.from(SITE_AUTH_USER);
-      const passBuf = Buffer.from(pass);
-      const expectedPassBuf = Buffer.from(SITE_AUTH_PASS);
-      const userOk = userBuf.length === expectedUserBuf.length && crypto.timingSafeEqual(userBuf, expectedUserBuf);
-      const passOk = passBuf.length === expectedPassBuf.length && crypto.timingSafeEqual(passBuf, expectedPassBuf);
-      if (userOk && passOk) return next();
-    }
-    res.set("WWW-Authenticate", 'Basic realm="LOMO"');
-    res.status(401).send("Требуется пароль доступа к сайту");
+const SITE_AUTH_COOKIE = "lomo_site_auth";
+const SITE_AUTH_MAX_AGE_SEC = 180 * 24 * 60 * 60;
+
+function siteGateHtml(showError) {
+  return `<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<title>LÖMO</title>
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<style>
+  :root { color-scheme: light dark; }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; min-height: 100vh; display: flex; align-items: center; justify-content: center;
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+    background: radial-gradient(circle at 20% 20%, #bbf7d0, transparent 45%),
+                radial-gradient(circle at 80% 80%, #86efac, transparent 45%), #f4faf6;
+    padding: 16px;
+  }
+  .card {
+    width: 100%; max-width: 340px; background: #fff; border-radius: 16px;
+    padding: 28px 24px; box-shadow: 0 10px 30px rgba(0,0,0,.12);
+  }
+  .logo {
+    width: 48px; height: 48px; border-radius: 50%; margin: 0 auto 16px;
+    display: flex; align-items: center; justify-content: center; color: #fff; font-weight: 700;
+    background: radial-gradient(circle at 30% 30%, #fff, #86efac 45%, #16a34a);
+  }
+  h1 { font-size: 17px; text-align: center; margin: 0 0 20px; color: #14532d; }
+  input {
+    width: 100%; padding: 11px 12px; margin-bottom: 10px; border-radius: 10px;
+    border: 1px solid #cbd5c9; font-size: 15px;
+  }
+  button {
+    width: 100%; padding: 11px; border-radius: 10px; border: none; margin-top: 6px;
+    background: #16a34a; color: #fff; font-size: 15px; font-weight: 600; cursor: pointer;
+  }
+  .err { color: #dc2626; font-size: 13px; text-align: center; margin: 0 0 10px; }
+</style>
+</head>
+<body>
+  <form class="card" method="post" action="/site-auth">
+    <div class="logo">LÖ</div>
+    <h1>Сайт закрыт паролем доступа</h1>
+    ${showError ? '<p class="err">Неверный логин или пароль</p>' : ""}
+    <input name="user" placeholder="Логин" autocomplete="username" autofocus>
+    <input name="pass" type="password" placeholder="Пароль" autocomplete="current-password">
+    <button type="submit">Войти</button>
+  </form>
+</body>
+</html>`;
+}
+
+function parseCookieHeader(header) {
+  const out = {};
+  (header || "").split(";").forEach((part) => {
+    const eq = part.indexOf("=");
+    if (eq < 0) return;
+    out[part.slice(0, eq).trim()] = decodeURIComponent(part.slice(eq + 1).trim());
   });
-  console.log("🔒 Сайт закрыт общим паролем (заданы SITE_AUTH_USER/SITE_AUTH_PASS) — доступ только после Basic Auth браузера.");
+  return out;
+}
+
+if (SITE_AUTH_USER && SITE_AUTH_PASS) {
+  // Токен — детерминированный HMAC от самих SITE_AUTH_USER/PASS (не
+  // случайный на процесс), иначе рестарт сервера (частый на Render, см.
+  // "[КРИТИЧНО]" ниже про эфемерную файловую систему) разлогинивал бы всех
+  // из сайт-гейта, хотя пароль не менялся.
+  const validToken = crypto.createHmac("sha256", SITE_AUTH_PASS).update(`${SITE_AUTH_USER}:site-gate`).digest("hex");
+
+  app.post("/site-auth", express.urlencoded({ extended: false }), (req, res) => {
+    const user = (req.body && req.body.user) || "";
+    const pass = (req.body && req.body.pass) || "";
+    const userBuf = Buffer.from(user);
+    const expectedUserBuf = Buffer.from(SITE_AUTH_USER);
+    const passBuf = Buffer.from(pass);
+    const expectedPassBuf = Buffer.from(SITE_AUTH_PASS);
+    const userOk = userBuf.length === expectedUserBuf.length && crypto.timingSafeEqual(userBuf, expectedUserBuf);
+    const passOk = passBuf.length === expectedPassBuf.length && crypto.timingSafeEqual(passBuf, expectedPassBuf);
+    if (userOk && passOk) {
+      const secure = req.secure || req.headers["x-forwarded-proto"] === "https";
+      res.setHeader(
+        "Set-Cookie",
+        `${SITE_AUTH_COOKIE}=${encodeURIComponent(validToken)}; Max-Age=${SITE_AUTH_MAX_AGE_SEC}; Path=/; HttpOnly; SameSite=Lax${secure ? "; Secure" : ""}`
+      );
+      return res.redirect(302, "/");
+    }
+    res.status(401).set("Content-Type", "text/html; charset=utf-8").send(siteGateHtml(true));
+  });
+
+  app.use((req, res, next) => {
+    if (req.path === "/site-auth") return next();
+    const cookies = parseCookieHeader(req.headers.cookie);
+    const cookieVal = cookies[SITE_AUTH_COOKIE] || "";
+    const cookieBuf = Buffer.from(cookieVal);
+    const tokenBuf = Buffer.from(validToken);
+    const ok = cookieBuf.length === tokenBuf.length && crypto.timingSafeEqual(cookieBuf, tokenBuf);
+    if (ok) return next();
+    res.status(401).set("Content-Type", "text/html; charset=utf-8").send(siteGateHtml(false));
+  });
+
+  console.log("🔒 Сайт закрыт общим паролем (заданы SITE_AUTH_USER/SITE_AUTH_PASS) — доступ через форму /site-auth, кука на 180 дней.");
 }
 
 app.use(cors());
