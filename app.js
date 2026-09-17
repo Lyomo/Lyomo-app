@@ -3183,12 +3183,26 @@ const CALL_ICE_SERVERS = [{ urls: "stun:stun.l.google.com:19302" }, { urls: "stu
 let activeCall = null;
 let callTimerInterval = null;
 
-function removeCallOverlay() {
+// Только визуальная карточка звонка — БЕЗ удаления #callRemoteAudio.
+// renderCallOverlay() вызывается несколько раз за один звонок (outgoing →
+// connecting → connected), а <audio> создаётся и запускается ОДИН раз, по
+// событию "track" (см. createCallPeerConnection()) — которое может
+// сработать раньше, чем pc.connectionState реально станет "connected".
+// Если бы каждая перерисовка удаляла и аудио-элемент тоже, уже играющий
+// звук обрывался бы молча на следующей смене статуса (это и был реальный
+// баг: собеседника не слышно, хотя соединение уже установлено).
+function clearCallOverlayUI() {
   const el = document.getElementById("callOverlay");
   if (el) el.remove();
+  if (callTimerInterval) { clearInterval(callTimerInterval); callTimerInterval = null; }
+}
+
+// Полная очистка (визуал + аудио) — только когда звонок ДЕЙСТВИТЕЛЬНО
+// завершается (cleanupCall()), а не при каждой промежуточной перерисовке.
+function removeCallOverlay() {
+  clearCallOverlayUI();
   const audioEl = document.getElementById("callRemoteAudio");
   if (audioEl) audioEl.remove();
-  if (callTimerInterval) { clearInterval(callTimerInterval); callTimerInterval = null; }
 }
 
 function startCallTimer() {
@@ -3205,7 +3219,7 @@ function startCallTimer() {
 }
 
 function renderCallOverlay() {
-  removeCallOverlay();
+  clearCallOverlayUI();
   if (!activeCall) return;
 
   const overlay = document.createElement("div");
@@ -3228,6 +3242,14 @@ function renderCallOverlay() {
       <button type="button" class="call-btn call-btn-decline" id="callDeclineBtn" title="Отклонить">${icon("call", 24)}</button>
       <button type="button" class="call-btn call-btn-accept" id="callAcceptBtn" title="Принять">${icon("call", 24)}</button>
     `;
+  } else if (activeCall.status === "connecting") {
+    // Между обменом SDP/ICE и РЕАЛЬНЫМ подключением (pc.connectionState
+    // === "connected") — отдельный статус, а не сразу "разговор идёт":
+    // раньше таймер стартовал сразу после ответа собеседника, ДО того как
+    // WebRTC-соединение реально устанавливалось, из-за чего казалось, что
+    // звонок "идёт", хотя аудио ещё (или вообще) не передавалось.
+    statusHtml = "Соединяем...";
+    actionsHtml = `<button type="button" class="call-btn call-btn-end" id="callCancelBtn" title="Завершить">${icon("call", 24)}</button>`;
   } else if (activeCall.status === "connected") {
     statusHtml = `<span id="callTimer">00:00</span>`;
     actionsHtml = `
@@ -3255,6 +3277,8 @@ function renderCallOverlay() {
   } else if (activeCall.status === "incoming") {
     document.getElementById("callAcceptBtn").addEventListener("click", acceptCall);
     document.getElementById("callDeclineBtn").addEventListener("click", declineCall);
+  } else if (activeCall.status === "connecting") {
+    document.getElementById("callCancelBtn").addEventListener("click", () => endCall("Звонок завершён"));
   } else if (activeCall.status === "connected") {
     document.getElementById("callHangupBtn").addEventListener("click", () => endCall("Звонок завершён"));
     const muteBtn = document.getElementById("callMuteBtn");
@@ -3308,8 +3332,18 @@ function createCallPeerConnection() {
       activeCall.status = "connected";
       renderCallOverlay();
     }
-    if ((pc.connectionState === "failed" || pc.connectionState === "disconnected") && activeCall.status === "connected") {
-      endCall("Соединение потеряно");
+    // Раньше проверялось только activeCall.status === "connected" — если
+    // ICE вообще не мог соединиться (нет TURN, оба за NAT, который STUN
+    // не пробивает), статус застревал на "connecting" НАВСЕГДА: pc так и
+    // не становился "connected", а "failed" никогда не ловился, потому что
+    // условие требовало уже быть "connected". Теперь звонок честно
+    // завершается и в этом случае — вместо вечного "Соединяем..." или,
+    // что было ещё хуже до фикса выше, вечного тикающего таймера без звука.
+    if (
+      (pc.connectionState === "failed" || pc.connectionState === "disconnected") &&
+      (activeCall.status === "connected" || activeCall.status === "connecting")
+    ) {
+      endCall(pc.connectionState === "failed" ? "Не удалось установить соединение" : "Соединение потеряно");
     }
   });
 
@@ -3378,7 +3412,10 @@ async function acceptCall() {
   await pc.setLocalDescription(answer);
   sendCallSignal("call-answer", { to: activeCall.peerLogin, callId: activeCall.callId, sdp: answer });
 
-  activeCall.status = "connected";
+  // НЕ "connected" — SDP отправлен, но реальное WebRTC-соединение ещё не
+  // установлено (см. connectionstatechange в createCallPeerConnection()),
+  // которое и переключит статус, когда медиа реально пойдёт.
+  activeCall.status = "connecting";
   renderCallOverlay();
 }
 
@@ -3446,7 +3483,10 @@ async function handleCallSignal(msg) {
       try { await activeCall.pc.addIceCandidate(candidate); } catch (e) { /* кандидат устарел — не критично */ }
     }
     activeCall.pendingCandidates = [];
-    activeCall.status = "connected";
+    // НЕ "connected" здесь же — то же самое, что и в acceptCall(): реальный
+    // переход в "connected" происходит по connectionstatechange, когда
+    // WebRTC-соединение действительно установлено.
+    activeCall.status = "connecting";
     renderCallOverlay();
     return;
   }
@@ -4293,6 +4333,7 @@ function renderCommentRow(c) {
     const photo = row.querySelector(".comment-photo");
     photo.src = c.photoUrl;
     photo.hidden = false;
+    photo.addEventListener("click", () => openPhotoLightbox(c.photoUrl));
   }
   return row;
 }
@@ -4351,6 +4392,7 @@ function renderPostCard(post) {
     const photo = card.querySelector(".post-photo");
     photo.src = post.photoUrl;
     photo.hidden = false;
+    photo.addEventListener("click", () => openPhotoLightbox(post.photoUrl));
   }
   card.querySelector(".like-count").textContent = post.likesCount;
   card.querySelector(".comment-count").textContent = post.commentsCount;
@@ -5315,8 +5357,13 @@ function renderPhotoItem(photo, onDelete) {
   const item = document.createElement("div");
   item.className = "photo-item";
   item.innerHTML = `<img class="photo-img"><button class="photo-delete-btn" title="Удалить">${icon("trash", 13)}</button>`;
-  item.querySelector(".photo-img").src = photo.url;
-  item.querySelector(".photo-delete-btn").addEventListener("click", () => onDelete(item));
+  const img = item.querySelector(".photo-img");
+  img.src = photo.url;
+  img.addEventListener("click", () => openPhotoLightbox(photo.url));
+  item.querySelector(".photo-delete-btn").addEventListener("click", (e) => {
+    e.stopPropagation();
+    onDelete(item);
+  });
   return item;
 }
 
