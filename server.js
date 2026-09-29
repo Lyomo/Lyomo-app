@@ -181,8 +181,8 @@ function siteGateHtml(showError) {
     <div class="logo">LÖ</div>
     <h1>Сайт закрыт паролем доступа</h1>
     ${showError ? '<p class="err">Неверный логин или пароль</p>' : ""}
-    <input name="user" placeholder="Логин" autocomplete="off" autocapitalize="off" spellcheck="false" autofocus>
-    <input name="pass" type="password" placeholder="Пароль" autocomplete="off">
+    <input name="siteUser" placeholder="Логин" autocomplete="off" autocapitalize="off" spellcheck="false" readonly onfocus="this.removeAttribute('readonly')" autofocus>
+    <input name="sitePass" type="password" placeholder="Пароль" autocomplete="new-password" readonly onfocus="this.removeAttribute('readonly')">
     <button type="submit">Войти</button>
   </form>
 </body>
@@ -207,8 +207,8 @@ if (SITE_AUTH_USER && SITE_AUTH_PASS) {
   const validToken = crypto.createHmac("sha256", SITE_AUTH_PASS).update(`${SITE_AUTH_USER}:site-gate`).digest("hex");
 
   app.post("/site-auth", express.urlencoded({ extended: false }), (req, res) => {
-    const user = (req.body && req.body.user) || "";
-    const pass = (req.body && req.body.pass) || "";
+    const user = (req.body && req.body.siteUser) || "";
+    const pass = (req.body && req.body.sitePass) || "";
     const userBuf = Buffer.from(user);
     const expectedUserBuf = Buffer.from(SITE_AUTH_USER);
     const passBuf = Buffer.from(pass);
