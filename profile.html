@@ -17,20 +17,24 @@
     <div class="app">
       <header id="headerRoot"></header>
 
-      <section class="profile-card" style="margin-bottom:16px;">
-        <div class="profile-avatar-wrap">
-          <img id="profileViewAvatar" class="profile-avatar" src="" alt="Аватар" style="display:none;">
+      <section class="profile-header" style="margin-bottom:16px;">
+        <div class="profile-cover" id="profileViewCover"></div>
+        <div class="profile-header-body">
+          <div class="profile-avatar-wrap">
+            <img id="profileViewAvatar" class="profile-avatar" src="" alt="Аватар" style="display:none;">
+          </div>
+          <div class="profile-info">
+            <div id="profileViewName" class="profile-name">…</div>
+            <div class="meta" style="margin-top:8px;">ID пользователя:</div>
+            <div id="profileViewId" class="profile-about"></div>
+            <div id="profileViewAboutLabel" class="meta" style="margin-top:8px;" hidden>О себе:</div>
+            <div id="profileViewAbout" class="profile-about" hidden></div>
+            <div id="profileViewBirthDateLabel" class="meta" style="margin-top:8px;" hidden>Дата рождения:</div>
+            <div id="profileViewBirthDate" class="profile-about" hidden></div>
+            <div class="profile-stats"><strong id="profileViewFollowersCount">0</strong> подписчиков</div>
+          </div>
+          <div id="profileFriendAction" style="margin-top:12px;display:flex;gap:8px;"></div>
         </div>
-        <div class="profile-info">
-          <div id="profileViewName" class="profile-name">…</div>
-          <div class="meta" style="margin-top:8px;">ID пользователя:</div>
-          <div id="profileViewId" class="profile-about"></div>
-          <div id="profileViewAboutLabel" class="meta" style="margin-top:8px;" hidden>О себе:</div>
-          <div id="profileViewAbout" class="profile-about" hidden></div>
-          <div id="profileViewBirthDateLabel" class="meta" style="margin-top:8px;" hidden>Дата рождения:</div>
-          <div id="profileViewBirthDate" class="profile-about" hidden></div>
-        </div>
-        <div id="profileFriendAction" style="margin-top:12px;display:flex;gap:8px;"></div>
       </section>
 
       <section>

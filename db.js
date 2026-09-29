@@ -258,6 +258,18 @@ ensureColumn("users", "birthDate", "TEXT NOT NULL DEFAULT ''");
 // новых групп без явного выбора, и для групп, созданных до этой колонки.
 ensureColumn("groups", "category", "TEXT NOT NULL DEFAULT 'other'");
 
+// Обложка профиля — необязательный URL картинки над аватаром (редизайн
+// "Мой аккаунт"), тот же паттерн, что avatarUrl: просто строка-ссылка,
+// в т.ч. на /uploads/... после POST /api/upload.
+ensureColumn("users", "coverUrl", "TEXT NOT NULL DEFAULT ''");
+
+// Репост поста — ссылка на ОРИГИНАЛЬНЫЙ пост. Не FK (проект их нигде не
+// использует) — если оригинал удалён, id остаётся "висячим", это разбирает
+// toPostPayload() в server.js (отдаёт {deleted:true} вместо самого поста).
+// NULL — обычный пост, не репост. Цепочки репостов не бывает: POST /api/posts
+// схлопывает repostOfId репоста на его же оригинал ещё при создании.
+ensureColumn("posts", "repostOfId", "TEXT");
+
 console.log(`🚀 LÖMO SQLite подключена: ${DB_PATH}`);
 
 export default db;

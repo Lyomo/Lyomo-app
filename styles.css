@@ -1293,6 +1293,83 @@ select option {
   color: var(--muted);
 }
 
+.profile-stats {
+  margin-top: 8px;
+  color: var(--muted);
+  font-size: 14px;
+}
+
+/* ========== ШАПКА ПРОФИЛЯ (обложка + аватар внахлёст) ==========
+   Обёртка над старым .profile-card: .profile-cover — картинка/градиент
+   сверху, .profile-header-body — сам .profile-card-подобный блок под ней,
+   куда аватар "заезжает" отрицательным margin-top (см. ниже) — тот же
+   визуальный приём, что в большинстве соцсетей (обложка+аватар внахлёст),
+   по прямому запросу пользователя при редизайне "Мой аккаунт". */
+.profile-header {
+  /* НЕ overflow:hidden здесь — .profile-header сам flex-item (родитель
+     .app это display:flex;flex-direction:column), а overflow:hidden на
+     flex-item с auto-высотой ловит баг Chromium (высота схлопывается в
+     считанные пиксели, хотя все дети внутри рендерятся с правильными
+     размерами — поймано вживую при первой версии этого блока). Обрезка
+     углов картинки обложки перенесена локально на .profile-cover ниже,
+     она не flex-item и с этим багом не сталкивается. */
+  border-radius: var(--radius-lg);
+  background: var(--chip);
+  border: 1px solid rgba(255,255,255,0.5);
+  box-shadow: 0 12px 28px var(--shadow);
+  backdrop-filter: blur(18px);
+  margin-bottom: 20px;
+}
+
+.profile-cover {
+  height: 180px;
+  border-radius: var(--radius-lg) var(--radius-lg) 0 0;
+  overflow: hidden;
+  background: linear-gradient(135deg, rgba(34,197,94,0.25), rgba(148,163,184,0.15)) center/cover no-repeat;
+  position: relative;
+}
+
+.cover-edit-btn {
+  position: absolute;
+  right: 12px;
+  bottom: 12px;
+  width: 34px;
+  height: 34px;
+  border-radius: 999px;
+  background: var(--chip);
+  border: 1px solid rgba(255,255,255,0.5);
+  box-shadow: 0 4px 10px var(--shadow);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  color: var(--fg);
+}
+
+.profile-header-body {
+  position: relative;
+  /* padding-top освобождает место под нижнюю половину аватара (см. ниже,
+     аватар — position:absolute, top:-48px = половина его 96px высоты
+     торчит вверх, над .profile-cover, вторая половина — уже здесь). */
+  padding: 56px 16px 16px;
+}
+
+/* Внахлёст аватара на обложку — через position:absolute (НЕ отрицательный
+   margin-top на первом дочернем элементе: margin у первого in-flow ребёнка
+   без BFC на родителе "схлопывается" с родителем и утягивает его же высоту
+   вверх на ту же величину — на практике .profile-header-body/.profile-header
+   после margin-версии считали свою высоту как ~2px вместо реальной суммы
+   .profile-cover+контента, хотя дети внутри рендерились с правильными
+   размерами. position:absolute полностью убирает элемент из потока —
+   родителя это не касается вообще). */
+.profile-header-body .profile-avatar-wrap {
+  position: absolute;
+  left: 16px;
+  top: -48px;
+  text-align: left;
+  margin: 0;
+}
+
 /* редактирование профиля — вложено в .profile-card, открывается шестерёнкой в углу */
 .profile-edit {
   position: static;
@@ -1375,6 +1452,164 @@ select option {
   gap: 6px;
   flex: 1;
   min-width: 160px;
+}
+
+/* Превью обложки в панели редактирования — тот же .avatar-edit-preview,
+   но прямоугольное (16:9), а не круглое, обложка не аватар. */
+.cover-edit-preview {
+  width: 96px;
+  height: 56px;
+  border-radius: var(--radius-md);
+}
+
+/* ========== СЕТКА "МОЙ АККАУНТ": СТЕНА + ВИДЖЕТЫ САЙДБАРА ==========
+   Ближайший существующий прецедент в проекте — .chat-layout ниже (фикс-
+   ширины колонка + гибкая), тот же принцип grid здесь, но без фикс-высоты/
+   overflow чата — это обычная скроллящаяся секция страницы, не полноэкранный
+   режим. .wall внутри .account-main сохраняет свой собственный max-width
+   (640px, читаемость ленты) — сетка его не трогает. */
+.account-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 300px;
+  gap: 20px;
+  align-items: start;
+}
+
+.account-sidebar {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.widget-card {
+  padding: 14px 16px;
+  border-radius: var(--radius-lg);
+  background: var(--chip);
+  border: 1px solid rgba(255,255,255,0.5);
+  box-shadow: 0 12px 28px var(--shadow);
+  backdrop-filter: blur(18px);
+}
+
+.widget-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  font-weight: 600;
+  margin-bottom: 10px;
+}
+
+.widget-title {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.widget-viewall {
+  font-size: 13px;
+  color: var(--muted);
+}
+
+.widget-empty {
+  font-size: 13px;
+  margin: 0;
+}
+
+.widget-photo-thumb {
+  width: 100%;
+  aspect-ratio: 1;
+  object-fit: cover;
+  border-radius: var(--radius-md);
+  cursor: pointer;
+}
+
+#widgetPhotos .widget-body {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 6px;
+}
+
+.widget-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 0;
+  color: var(--fg);
+}
+
+.widget-row-avatar {
+  width: 28px;
+  height: 28px;
+  border-radius: 999px;
+  background: rgba(148,163,184,0.3) center/cover no-repeat;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--muted);
+  flex: 0 0 auto;
+}
+
+.widget-row-icon {
+  width: 28px;
+  height: 28px;
+  border-radius: 999px;
+  background: rgba(34,197,94,0.15);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex: 0 0 auto;
+  color: var(--primary-dark);
+}
+
+/* ========== РЕПОСТЫ ========== */
+
+.post-repost-inner {
+  margin-top: 10px;
+  padding: 10px 12px;
+  border-radius: var(--radius-md);
+  border: 1px solid rgba(148,163,184,0.3);
+  background: rgba(148,163,184,0.08);
+}
+
+.dark .post-repost-inner {
+  background: rgba(15,23,42,0.5);
+}
+
+.post-repost-inner .post-author {
+  font-weight: 600;
+}
+
+.post-repost-inner .post-text {
+  margin: 4px 0 0;
+}
+
+/* .post-photo внутри вложенной карточки — та же глобальная стилизация
+   (.post-photo уже задаёт рамку/курсор/object-fit), только пониже, чтобы
+   вложенный уровень не растягивал карточку репоста на всю высоту оригинала. */
+.post-repost-inner .post-photo {
+  max-height: 280px;
+}
+
+.repost-form {
+  margin-top: 10px;
+  padding-top: 10px;
+  border-top: 1px solid rgba(148,163,184,0.3);
+}
+
+.repost-form textarea {
+  width: 100%;
+  resize: vertical;
+  margin-bottom: 8px;
+}
+
+.repost-form-preview {
+  font-size: 13px;
+  color: var(--muted);
+  margin-bottom: 8px;
+  padding: 8px 10px;
+  border-radius: var(--radius-md);
+  background: rgba(148,163,184,0.1);
 }
 
 /* ========== CHAT ЛЕЙАУТ ========== */
@@ -2905,6 +3140,25 @@ select option {
 
   .home-grid {
     grid-template-columns: minmax(0, 1fr);
+  }
+
+  /* Виджеты "Мой аккаунт" на мобильном — под стеной, не сбоку (просто
+     схлопнуть колонку; .account-main в разметке идёт раньше .account-sidebar,
+     поэтому порядок и так правильный без явного order). */
+  .account-grid {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .profile-header-body .profile-avatar-wrap {
+    top: -40px;
+  }
+
+  .profile-header-body {
+    padding-top: 48px;
+  }
+
+  .profile-cover {
+    height: 120px;
   }
 
   /* Чат на мобильном — два отдельных "экрана", как в ВК: сначала список

@@ -361,7 +361,7 @@ const stmts = {
   findUserById: db.prepare("SELECT * FROM users WHERE id = ?"),
   insertUser: db.prepare("INSERT INTO users (id, login, password, avatarUrl, isAdmin, createdAt, termsAcceptedAt, displayName, birthDate) VALUES (?, ?, ?, ?, 0, ?, ?, ?, ?)"),
   updatePassword: db.prepare("UPDATE users SET password = ? WHERE id = ?"),
-  updateUserProfile: db.prepare("UPDATE users SET avatarUrl = ?, about = ?, displayName = ? WHERE id = ?"),
+  updateUserProfile: db.prepare("UPDATE users SET avatarUrl = ?, about = ?, displayName = ?, coverUrl = ? WHERE id = ?"),
 
   // ===== Админка =====
   countUsers: db.prepare("SELECT COUNT(*) AS c FROM users"),
@@ -442,7 +442,7 @@ const stmts = {
   // в обработчике роута.
   listUsersExceptSelf: db.prepare("SELECT * FROM users WHERE id <> ?"),
 
-  insertPost: db.prepare("INSERT INTO posts (id, ownerType, ownerId, authorId, text, photoUrl, createdAt, moderationStatus, moderationReason) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)"),
+  insertPost: db.prepare("INSERT INTO posts (id, ownerType, ownerId, authorId, text, photoUrl, createdAt, moderationStatus, moderationReason, repostOfId) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"),
   findPostById: db.prepare("SELECT * FROM posts WHERE id = ?"),
   listPosts: db.prepare("SELECT * FROM posts WHERE ownerType = ? AND ownerId = ? ORDER BY createdAt DESC"),
   deletePost: db.prepare("DELETE FROM posts WHERE id = ?"),
@@ -750,10 +750,24 @@ function toPublicUser(user) {
     login: user.login,
     displayName: user.displayName || "",
     avatarUrl: user.avatarUrl,
+    coverUrl: user.coverUrl || "",
     about: user.about || "",
     birthDate: user.birthDate || "",
     isAdmin: !!user.isAdmin
   };
+}
+
+// "Подписчики" без отдельной таблицы follow — по прямому запросу пользователя
+// при редизайне "Мой аккаунт" переиспользуем уже существующие friendships:
+// взаимные друзья + те, кто прислал ЕЩЁ не принятую заявку этому userId
+// (т.е. все, кто сейчас "нацелен" на этого пользователя, взаимно или нет).
+// Честная метрика без выдуманных чисел — не отдельная сущность "follow".
+// НЕ встроено в toPublicUser() специально: та вызывается в горячих путях
+// (поиск людей, списки друзей) — там лишние 2 запроса на каждую строку не
+// нужны; followersCount считается точечно только там, где реально показывается.
+function followersCountOf(userId) {
+  return stmts.listFriends.all(userId, userId, userId).length
+    + stmts.listIncomingRequests.all(userId, userId, userId, userId).length;
 }
 
 // Расширенная карточка пользователя — только для админки (там, где не
@@ -779,7 +793,7 @@ function toMessagePayload(row) {
 
 function toPostPayload(post, userId) {
   const author = stmts.findUserById.get(post.authorId);
-  return {
+  const payload = {
     id: post.id,
     ownerType: post.ownerType,
     ownerId: post.ownerId,
@@ -793,8 +807,18 @@ function toPostPayload(post, userId) {
     commentsCount: stmts.countComments.get(post.id).c,
     likedByMe: !!stmts.findLike.get(post.id, userId),
     moderationStatus: post.moderationStatus || "clean",
-    moderationReason: post.moderationReason || null
+    moderationReason: post.moderationReason || null,
+    repostOfId: post.repostOfId || null,
+    repostOf: null
   };
+  // Вложенный оригинал — рекурсия безопасна: POST /api/posts схлопывает
+  // repostOfId репоста на его же оригинал ещё при создании, поэтому
+  // payload.repostOf сам никогда не бывает репостом (максимум 1 уровень).
+  if (post.repostOfId) {
+    const original = stmts.findPostById.get(post.repostOfId);
+    payload.repostOf = original ? toPostPayload(original, userId) : { deleted: true };
+  }
+  return payload;
 }
 
 function toCommentPayload(comment) {
@@ -954,7 +978,7 @@ app.get("/api/me", requireAuth, (req, res) => {
   try {
     const user = stmts.findUserById.get(req.user.id);
     if (!user) return res.status(404).json({ error: "Пользователь не найден" });
-    res.json(toPublicUser(user));
+    res.json({ ...toPublicUser(user), followersCount: followersCountOf(user.id) });
   } catch (e) { res.status(500).json({ error: "Ошибка" }); }
 });
 
@@ -967,12 +991,14 @@ app.patch("/api/me", requireAuth, (req, res) => {
   try {
     const current = stmts.findUserById.get(req.user.id);
     if (!current) return res.status(404).json({ error: "Пользователь не найден" });
-    const { avatarUrl, about, displayName } = req.body;
+    const { avatarUrl, about, displayName, coverUrl } = req.body;
     const nextAvatar = typeof avatarUrl === "string" ? avatarUrl.trim() : current.avatarUrl;
     const nextAbout = typeof about === "string" ? about.trim() : current.about;
     const nextDisplayName = typeof displayName === "string" ? displayName.trim().slice(0, 60) : current.displayName;
-    stmts.updateUserProfile.run(nextAvatar, nextAbout, nextDisplayName, req.user.id);
-    res.json(toPublicUser(stmts.findUserById.get(req.user.id)));
+    const nextCover = typeof coverUrl === "string" ? coverUrl.trim() : current.coverUrl;
+    stmts.updateUserProfile.run(nextAvatar, nextAbout, nextDisplayName, nextCover, req.user.id);
+    const updated = stmts.findUserById.get(req.user.id);
+    res.json({ ...toPublicUser(updated), followersCount: followersCountOf(updated.id) });
   } catch (e) { res.status(500).json({ error: "Ошибка обновления профиля" }); }
 });
 
@@ -982,7 +1008,7 @@ app.get("/api/user-by-id/:id", requireAuth, (req, res) => {
   try {
     const user = stmts.findUserById.get(req.params.id);
     if (!user) return res.status(404).json({ error: "Пользователь не найден" });
-    res.json(toPublicUser(user));
+    res.json({ ...toPublicUser(user), followersCount: followersCountOf(user.id) });
   } catch (e) { res.status(500).json({ error: "Ошибка" }); }
 });
 
@@ -1017,10 +1043,18 @@ app.post("/api/upload", requireAuth, uploadAny.single("file"), (req, res) => {
 
 app.post("/api/posts", requireAuth, (req, res) => {
   try {
-    const { ownerType, ownerId, text, photoUrl } = req.body;
+    const { ownerType, ownerId, text, photoUrl, repostOfId } = req.body;
     const trimmed = (text || "").trim();
     const photo = typeof photoUrl === "string" && photoUrl.startsWith("/uploads/") ? photoUrl : null;
-    if (!trimmed && !photo) return res.status(400).json({ error: "Пустой пост" });
+    // Репост — ссылка на ОРИГИНАЛЬНЫЙ пост; если репостят уже репост,
+    // схлопываем на его же оригинал сразу здесь — цепочек репостов не бывает.
+    let finalRepostOfId = null;
+    if (typeof repostOfId === "string" && repostOfId) {
+      const original = stmts.findPostById.get(repostOfId);
+      if (!original) return res.status(404).json({ error: "Исходный пост не найден" });
+      finalRepostOfId = original.repostOfId || original.id;
+    }
+    if (!trimmed && !photo && !finalRepostOfId) return res.status(400).json({ error: "Пустой пост" });
     if (ownerType === "user") {
       const target = stmts.findUserById.get(ownerId);
       if (!target) return res.status(404).json({ error: "Профиль не найден" });
@@ -1039,7 +1073,7 @@ app.post("/api/posts", requireAuth, (req, res) => {
     const id = crypto.randomUUID();
     const moderationStatus = verdict.action === "flag" ? "flagged" : "clean";
     const moderationReason = verdict.action === "flag" ? verdict.reasons.join(", ") : null;
-    stmts.insertPost.run(id, ownerType, ownerId, req.user.id, trimmed, photo, Date.now(), moderationStatus, moderationReason);
+    stmts.insertPost.run(id, ownerType, ownerId, req.user.id, trimmed, photo, Date.now(), moderationStatus, moderationReason, finalRepostOfId);
     res.json(toPostPayload(stmts.findPostById.get(id), req.user.id));
   } catch (e) { res.status(500).json({ error: "Ошибка публикации" }); }
 });

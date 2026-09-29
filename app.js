@@ -683,19 +683,32 @@ async function initAccountPage() {
   const avatarUploadBtn   = document.getElementById("avatarUploadBtn");
   const avatarFileInput   = document.getElementById("avatarFileInput");
 
+  const profileCover      = document.getElementById("profileCover");
+  const coverUploadBtn    = document.getElementById("coverUploadBtn");
+  const coverUploadBtn2   = document.getElementById("coverUploadBtn2");
+  const coverFileInput    = document.getElementById("coverFileInput");
+  const coverEditPreview  = document.getElementById("coverEditPreview");
+  const inputCover        = document.getElementById("coverUrlInput");
+  const followersCountEl  = document.getElementById("profileFollowersCount");
+
   const profileLoginEl = document.getElementById("profileLogin");
 
   // displayName/avatarUrl/about раньше жили только в localStorage и были
   // не видны никому, кроме вас самих в этом браузере. Теперь это настоящие
   // серверные поля (см. PATCH /api/me) — login при этом НЕ меняется, это
   // фиксированный технический идентификатор (уникальность, вход, WS).
-  let profileData = { name: user.login, about: "", avatar: "", birthDate: "" };
+  let profileData = { name: user.login, about: "", avatar: "", cover: "", birthDate: "" };
+  // followersCount — не редактируемое поле профиля, поэтому отдельно от
+  // profileData (та отражает только то, что реально шлётся в PATCH /api/me).
+  let followersCount = 0;
   try {
     const server = await apiRequest("/api/me");
     profileData.name = server.displayName || user.login;
     profileData.avatar = server.avatarUrl || "";
+    profileData.cover = server.coverUrl || "";
     profileData.about = server.about || "";
     profileData.birthDate = server.birthDate || "";
+    followersCount = server.followersCount || 0;
   } catch (e) {
     console.error("Не удалось загрузить профиль с сервера:", e);
   }
@@ -734,6 +747,15 @@ async function initAccountPage() {
         avatarEditPreview.textContent = (profileData.name || user.login)[0].toUpperCase();
       }
     }
+
+    if (profileCover) {
+      profileCover.style.backgroundImage = profileData.cover ? `url("${profileData.cover}")` : "";
+      profileCover.classList.toggle("has-cover", !!profileData.cover);
+    }
+    if (coverEditPreview) {
+      coverEditPreview.style.backgroundImage = profileData.cover ? `url("${profileData.cover}")` : "";
+    }
+    if (followersCountEl) followersCountEl.textContent = followersCount;
   }
 
   renderDisplay();
@@ -745,6 +767,7 @@ async function initAccountPage() {
   if (inputName)   inputName.value   = profileData.name || "";
   if (inputAbout)  inputAbout.value  = profileData.about || "";
   if (inputAvatar) inputAvatar.value = profileData.avatar || "";
+  if (inputCover)  inputCover.value  = profileData.cover || "";
 
   if (avatarUploadBtn && avatarFileInput) {
     avatarUploadBtn.addEventListener("click", () => avatarFileInput.click());
@@ -769,18 +792,46 @@ async function initAccountPage() {
     });
   }
 
+  if (coverUploadBtn && coverFileInput) {
+    coverUploadBtn.addEventListener("click", () => coverFileInput.click());
+  }
+  if (coverUploadBtn2 && coverFileInput) {
+    coverUploadBtn2.addEventListener("click", () => coverFileInput.click());
+  }
+  if (coverFileInput) {
+    coverFileInput.addEventListener("change", async () => {
+      const file = coverFileInput.files && coverFileInput.files[0];
+      if (!file) return;
+      try {
+        const form = new FormData();
+        form.append("file", file);
+        const uploaded = await apiRequest("/api/upload", { method: "POST", body: form });
+        await apiRequest("/api/me", { method: "PATCH", body: { coverUrl: uploaded.url } });
+        profileData.cover = uploaded.url;
+        if (inputCover) inputCover.value = uploaded.url;
+        renderDisplay();
+      } catch (err) {
+        alert("Ошибка загрузки обложки: " + err.message);
+      } finally {
+        coverFileInput.value = "";
+      }
+    });
+  }
+
   if (saveBtn) {
     saveBtn.addEventListener("click", async () => {
       const newName   = inputName  ? inputName.value.trim()  : "";
       const newAbout  = inputAbout ? inputAbout.value.trim() : "";
       const newAvatar = inputAvatar ? inputAvatar.value.trim() : "";
+      const newCover  = inputCover ? inputCover.value.trim() : "";
 
       profileData.name   = newName;
       profileData.about  = newAbout;
       profileData.avatar = newAvatar;
+      profileData.cover  = newCover;
 
       try {
-        await apiRequest("/api/me", { method: "PATCH", body: { displayName: newName, avatarUrl: newAvatar, about: newAbout } });
+        await apiRequest("/api/me", { method: "PATCH", body: { displayName: newName, avatarUrl: newAvatar, about: newAbout, coverUrl: newCover } });
       } catch (err) {
         alert("Не удалось сохранить: " + err.message);
         return;
@@ -792,6 +843,106 @@ async function initAccountPage() {
   }
 
   initWall("wallSection", "user", user.id, true);
+
+  renderSidebarWidget("widgetPhotos", {
+    title: "Фотографии", iconName: "photos", viewAllHref: "photos.html",
+    emptyText: "Пока нет фото.",
+    fetchItems: async () => {
+      const albums = await apiRequest(`/api/albums/${encodeURIComponent(user.id)}`);
+      if (!albums.length) return [];
+      const photos = await apiRequest(`/api/albums/${encodeURIComponent(albums[0].id)}/photos`);
+      return photos.slice(0, 6);
+    },
+    renderItem: (photo) => {
+      const img = document.createElement("img");
+      img.className = "widget-photo-thumb";
+      img.src = photo.url;
+      img.addEventListener("click", () => openPhotoLightbox(photo.url));
+      return img;
+    }
+  });
+
+  renderSidebarWidget("widgetFriends", {
+    title: "Друзья", iconName: "friends", viewAllHref: "friends.html",
+    emptyText: "Пока нет друзей.",
+    fetchItems: async () => (await apiRequest("/api/friends")).slice(0, 6),
+    renderItem: (f) => renderPersonRow(f, {})
+  });
+
+  renderSidebarWidget("widgetGroups", {
+    title: "Сообщества", iconName: "groups", viewAllHref: "groups.html",
+    emptyText: "Нет сообществ.",
+    fetchItems: async () => (await apiRequest("/api/groups?mine=1")).slice(0, 6),
+    renderItem: renderGroupWidgetRow
+  });
+
+  renderSidebarWidget("widgetMusic", {
+    title: "Музыка", iconName: "music", viewAllHref: "music.html",
+    emptyText: "Пока нет треков.",
+    fetchItems: async () => (await apiRequest("/api/tracks")).slice(0, 6),
+    renderItem: renderTrackWidgetRow
+  });
+}
+
+// Универсальный виджет сайдбара "Мой аккаунт" — карточка "иконка+заголовок+
+// ссылка Все + короткий список превью + пустое состояние". Все 4 виджета
+// (Фотографии/Друзья/Сообщества/Музыка) визуально одинаковы, отличаются
+// только источником данных и рендером одного элемента — тот же принцип, что
+// уже даёт renderPersonRow()/renderEmptyState() в проекте, четыре почти
+// одинаковые функции не нужны.
+async function renderSidebarWidget(containerId, { title, iconName, viewAllHref, fetchItems, renderItem, emptyText }) {
+  const el = document.getElementById(containerId);
+  if (!el) return;
+  el.innerHTML = `
+    <div class="widget-header">
+      <span class="widget-title">${icon(iconName, 17)} ${title}</span>
+      <a class="widget-viewall" href="${viewAllHref}">Все</a>
+    </div>
+    <div class="widget-body"></div>
+  `;
+  const body = el.querySelector(".widget-body");
+  try {
+    const items = await fetchItems();
+    if (!items.length) {
+      body.innerHTML = `<p class="muted widget-empty">${emptyText}</p>`;
+      return;
+    }
+    items.forEach((item) => body.appendChild(renderItem(item)));
+  } catch (err) {
+    body.innerHTML = `<p class="muted">Ошибка загрузки</p>`;
+  }
+}
+
+function renderGroupWidgetRow(g) {
+  const row = document.createElement("a");
+  row.className = "widget-row";
+  row.href = `group.html?id=${encodeURIComponent(g.id)}`;
+  const avatar = document.createElement("span");
+  avatar.className = "widget-row-avatar";
+  if (g.avatarUrl) {
+    avatar.style.backgroundImage = `url("${g.avatarUrl}")`;
+  } else {
+    avatar.textContent = (g.name || "?")[0].toUpperCase();
+  }
+  const name = document.createElement("span");
+  name.textContent = g.name;
+  row.appendChild(avatar);
+  row.appendChild(name);
+  return row;
+}
+
+function renderTrackWidgetRow(t) {
+  const row = document.createElement("a");
+  row.className = "widget-row";
+  row.href = "music.html";
+  const iconWrap = document.createElement("span");
+  iconWrap.className = "widget-row-icon";
+  iconWrap.innerHTML = icon("music", 14);
+  const label = document.createElement("span");
+  label.textContent = t.artist ? `${t.title} — ${t.artist}` : t.title;
+  row.appendChild(iconWrap);
+  row.appendChild(label);
+  return row;
 }
 
 // ========================
@@ -4350,9 +4501,16 @@ function renderPostCard(post) {
     <div class="moderation-reason" hidden></div>
     <img class="post-photo" hidden>
     <div class="post-text"></div>
+    <div class="post-repost-inner" hidden></div>
     <div class="post-actions">
       <button class="post-like-btn btn">${icon("like", 16)} <span class="like-count"></span></button>
       <button class="post-comment-toggle btn">${icon("comment", 16)} <span class="comment-count"></span></button>
+      <button class="post-repost-btn btn">${icon("repost", 16)} Поделиться</button>
+    </div>
+    <div class="repost-form" hidden>
+      <textarea placeholder="Добавить подпись (необязательно)..." rows="2"></textarea>
+      <div class="repost-form-preview"></div>
+      <button type="button" class="btn primary repost-form-submit">Опубликовать</button>
     </div>
     <div class="post-comments" hidden>
       <div class="comments-list"></div>
@@ -4394,6 +4552,48 @@ function renderPostCard(post) {
     photo.hidden = false;
     photo.addEventListener("click", () => openPhotoLightbox(post.photoUrl));
   }
+
+  // Репост — заголовок карточки меняется на нейтральную формулировку (в
+  // проекте нет данных о поле пользователя, чтобы корректно склонять
+  // "поделился"/"поделилась"), а под текстом (необязательная подпись)
+  // рендерится вложенная мини-карточка оригинала — без своих кнопок
+  // лайк/коммент/репост, вложенный уровень не интерактивен — либо честный
+  // плейсхолдер, если оригинал с тех пор удалили.
+  if (post.repostOfId) {
+    authorLink.insertAdjacentHTML("afterend", ` <span class="meta">— репост</span>`);
+    const innerEl = card.querySelector(".post-repost-inner");
+    innerEl.hidden = false;
+    if (post.repostOf && post.repostOf.deleted) {
+      innerEl.textContent = "Пост удалён";
+    } else if (post.repostOf) {
+      const orig = post.repostOf;
+      const origAuthor = document.createElement("a");
+      origAuthor.href = `profile.html?id=${encodeURIComponent(orig.authorId)}`;
+      origAuthor.className = "post-author";
+      origAuthor.textContent = orig.authorName;
+      const origDate = document.createElement("span");
+      origDate.className = "meta";
+      origDate.textContent = " · " + formatWallDate(orig.createdAt);
+      const origHeader = document.createElement("div");
+      origHeader.appendChild(origAuthor);
+      origHeader.appendChild(origDate);
+      innerEl.appendChild(origHeader);
+      if (orig.text) {
+        const origText = document.createElement("div");
+        origText.className = "post-text";
+        origText.textContent = orig.text;
+        innerEl.appendChild(origText);
+      }
+      if (orig.photoUrl) {
+        const origPhoto = document.createElement("img");
+        origPhoto.className = "post-photo";
+        origPhoto.src = orig.photoUrl;
+        origPhoto.addEventListener("click", () => openPhotoLightbox(orig.photoUrl));
+        innerEl.appendChild(origPhoto);
+      }
+    }
+  }
+
   card.querySelector(".like-count").textContent = post.likesCount;
   card.querySelector(".comment-count").textContent = post.commentsCount;
 
@@ -4405,6 +4605,43 @@ function renderPostCard(post) {
       likeBtn.classList.toggle("active", res.likedByMe);
       card.querySelector(".like-count").textContent = res.likesCount;
     } catch (err) { alert("Ошибка: " + err.message); }
+  });
+
+  // "Поделиться" — инлайн-форма (показать/скрыть, тот же паттерн, что у
+  // .post-comments чуть ниже), НЕ prompt()/alert() для ввода подписи —
+  // единственное реальное действие формы это POST /api/posts с repostOfId,
+  // указывающим на ЭТОТ пост (сервер сам схлопывает repostOfId, если этот
+  // пост сам уже репост — см. POST /api/posts в server.js).
+  const repostBtn = card.querySelector(".post-repost-btn");
+  const repostForm = card.querySelector(".repost-form");
+  const repostPreview = card.querySelector(".repost-form-preview");
+  const repostTextarea = repostForm.querySelector("textarea");
+  const repostSubmitBtn = card.querySelector(".repost-form-submit");
+  repostBtn.addEventListener("click", () => {
+    repostForm.hidden = !repostForm.hidden;
+    if (!repostForm.hidden) {
+      repostPreview.textContent = `${post.authorName}: ${post.text ? post.text.slice(0, 80) : "(фото)"}`;
+      repostTextarea.focus();
+    }
+  });
+  repostSubmitBtn.addEventListener("click", async () => {
+    repostSubmitBtn.disabled = true;
+    try {
+      await apiRequest("/api/posts", {
+        method: "POST",
+        body: { ownerType: "user", ownerId: loadUser().id, text: repostTextarea.value.trim(), repostOfId: post.id }
+      });
+      repostSubmitBtn.textContent = "Опубликовано ✓";
+      setTimeout(() => {
+        repostForm.hidden = true;
+        repostTextarea.value = "";
+        repostSubmitBtn.textContent = "Опубликовать";
+        repostSubmitBtn.disabled = false;
+      }, 2000);
+    } catch (err) {
+      alert("Не удалось поделиться: " + err.message);
+      repostSubmitBtn.disabled = false;
+    }
   });
 
   const commentToggle = card.querySelector(".post-comment-toggle");
@@ -4796,6 +5033,8 @@ async function initProfilePage() {
   const targetId = new URLSearchParams(window.location.search).get("id");
   const nameEl = document.getElementById("profileViewName");
   const avatarEl = document.getElementById("profileViewAvatar");
+  const coverEl = document.getElementById("profileViewCover");
+  const followersCountEl = document.getElementById("profileViewFollowersCount");
   const idEl = document.getElementById("profileViewId");
   const aboutLabelEl = document.getElementById("profileViewAboutLabel");
   const aboutEl = document.getElementById("profileViewAbout");
@@ -4839,6 +5078,11 @@ async function initProfilePage() {
       avatarEl.style.display = "none";
     }
   }
+  if (coverEl && target.coverUrl) {
+    coverEl.style.backgroundImage = `url("${target.coverUrl}")`;
+    coverEl.classList.add("has-cover");
+  }
+  if (followersCountEl) followersCountEl.textContent = target.followersCount || 0;
 
   async function renderFriendAction() {
     if (!friendBtnWrap) return;

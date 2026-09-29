@@ -18,8 +18,17 @@
     <div class="app">
       <header id="headerRoot"></header>
 
-      <section class="home-grid">
-        <div class="profile-card">
+      <section class="profile-header">
+        <div class="profile-cover" id="profileCover">
+          <button type="button" id="coverUploadBtn" class="cover-edit-btn" title="Изменить обложку" aria-label="Изменить обложку">
+            <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+              <path d="M4 8h3l1.5-2h7L17 8h3a1 1 0 0 1 1 1v9a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1V9a1 1 0 0 1 1-1z"/>
+              <circle cx="12" cy="13" r="3.5"/>
+            </svg>
+          </button>
+          <input type="file" id="coverFileInput" accept="image/*" hidden>
+        </div>
+        <div class="profile-header-body">
           <div class="profile-avatar-wrap">
             <img id="profileAvatar" class="profile-avatar" src="" alt="Аватар">
             <div id="avatarPlaceholder">?</div>
@@ -33,6 +42,7 @@
             <div id="profileAbout" class="profile-about">Расскажи о себе :)</div>
             <div id="profileBirthDateLabel" class="meta" style="margin-top:8px;" hidden>Дата рождения:</div>
             <div id="profileBirthDate" class="profile-about" hidden></div>
+            <div class="profile-stats"><strong id="profileFollowersCount">0</strong> подписчиков</div>
           </div>
 
           <details class="profile-edit">
@@ -42,6 +52,16 @@
               </svg>
             </summary>
             <div class="profile-edit-body">
+              <label>
+                <div class="meta">Обложка профиля:</div>
+                <div class="avatar-edit-row">
+                  <div id="coverEditPreview" class="avatar-edit-preview cover-edit-preview"></div>
+                  <div class="avatar-edit-actions">
+                    <button type="button" id="coverUploadBtn2" class="btn">Загрузить фото</button>
+                    <input id="coverUrlInput" placeholder="или вставь ссылку https://...">
+                  </div>
+                </div>
+              </label>
               <label>
                 <div class="meta">Фото профиля:</div>
                 <div class="avatar-edit-row">
@@ -67,9 +87,17 @@
         </div>
       </section>
 
-      <section>
-        <h2>Моя стена</h2>
-        <div id="wallSection" class="wall"></div>
+      <section class="account-grid">
+        <div class="account-main">
+          <h2>Моя стена</h2>
+          <div id="wallSection" class="wall"></div>
+        </div>
+        <aside class="account-sidebar">
+          <div class="widget-card" id="widgetPhotos"></div>
+          <div class="widget-card" id="widgetFriends"></div>
+          <div class="widget-card" id="widgetGroups"></div>
+          <div class="widget-card" id="widgetMusic"></div>
+        </aside>
       </section>
     </div>
   </div>
