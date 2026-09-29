@@ -181,8 +181,8 @@ function siteGateHtml(showError) {
     <div class="logo">LÖ</div>
     <h1>Сайт закрыт паролем доступа</h1>
     ${showError ? '<p class="err">Неверный логин или пароль</p>' : ""}
-    <input name="user" placeholder="Логин" autocomplete="username" autofocus>
-    <input name="pass" type="password" placeholder="Пароль" autocomplete="current-password">
+    <input name="user" placeholder="Логин" autocomplete="off" autocapitalize="off" spellcheck="false" autofocus>
+    <input name="pass" type="password" placeholder="Пароль" autocomplete="off">
     <button type="submit">Войти</button>
   </form>
 </body>
